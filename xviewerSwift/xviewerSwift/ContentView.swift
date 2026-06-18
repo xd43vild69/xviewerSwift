@@ -143,6 +143,49 @@ struct FileItemView: View {
     }
 }
 
+class ImmersiveWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+class ImmersiveWindowController {
+    static let shared = ImmersiveWindowController()
+    private var window: ImmersiveWindow?
+    
+    func show<Content: View>(@ViewBuilder content: @escaping () -> Content) {
+        if let existingWindow = window {
+            existingWindow.contentView = NSHostingView(rootView: content())
+            return
+        }
+        
+        let screenRect = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        
+        let newWindow = ImmersiveWindow(
+            contentRect: screenRect,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        newWindow.level = .screenSaver
+        newWindow.backgroundColor = .black
+        newWindow.isOpaque = true
+        newWindow.hasShadow = false
+        newWindow.isReleasedWhenClosed = false
+        newWindow.collectionBehavior = [.fullScreenPrimary, .canJoinAllSpaces]
+        
+        newWindow.contentView = NSHostingView(rootView: content())
+        
+        self.window = newWindow
+        newWindow.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    func hide() {
+        window?.close()
+        window = nil
+    }
+}
+
 class ZoomState: ObservableObject {
     @Published var currentZoom: CGFloat = 0.0
     @Published var totalZoom: CGFloat = 1.0
@@ -321,6 +364,7 @@ struct ContentView: View {
                     if url.startAccessingSecurityScopedResource() {
                         securityScopedURL = url
                     }
+                    saveBookmark(for: url)
                     loadFolder(url: url)
                 }
             case .failure(let error):
@@ -387,6 +431,13 @@ struct ContentView: View {
             }
             .onAppear {
                 currentColumnCount = columns
+                if let url = restoreBookmark(), url.startAccessingSecurityScopedResource() {
+                    securityScopedURL = url
+                    loadFolder(url: url)
+                } else {
+                    let home = FileManager.default.homeDirectoryForCurrentUser
+                    loadFolder(url: home)
+                }
             }
         } // closes ScrollViewReader
         } // closes GeometryReader
@@ -423,6 +474,30 @@ struct ContentView: View {
             Button(action: { handleEnter() }) { Text("") }
                 .keyboardShortcut(.downArrow, modifiers: [.command])
                 .opacity(0)
+                
+            Button(action: { copySelectedItemToClipboard() }) { Text("") }
+                .keyboardShortcut("c", modifiers: [.command])
+                .opacity(0)
+                
+            Button(action: { pasteFromClipboard() }) { Text("") }
+                .keyboardShortcut("v", modifiers: [.command])
+                .opacity(0)
+                
+            Button(action: { deleteSelectedItem() }) { Text("") }
+                .keyboardShortcut(KeyEquivalent("\u{7F}"), modifiers: []) // Backspace
+                .opacity(0)
+                
+            Button(action: { deleteSelectedItem() }) { Text("") }
+                .keyboardShortcut(KeyEquivalent("\u{7F}"), modifiers: [.command]) // Cmd + Backspace
+                .opacity(0)
+                
+            Button(action: { deleteSelectedItem() }) { Text("") }
+                .keyboardShortcut(.delete, modifiers: []) // Forward Delete
+                .opacity(0)
+                
+            Button(action: { deleteSelectedItem() }) { Text("") }
+                .keyboardShortcut(.delete, modifiers: [.command]) // Cmd + Forward Delete
+                .opacity(0)
         }
     }
 
@@ -451,13 +526,8 @@ struct ContentView: View {
                     rightPanel
                 }
                 
-                if let url = fullScreenImageURL {
-                    FullScreenImageView(url: url, onClose: {
-                        fullScreenImageURL = nil
-                    }, navigateImage: { direction in
-                        navigateFullScreen(direction: direction)
-                    })
-                }
+                // Full screen presentation is now handled via .onChange of fullScreenImageURL
+
                 
                 shortcutsGroup
             }
@@ -467,6 +537,19 @@ struct ContentView: View {
             .frame(width: mainGeometry.size.width, height: mainGeometry.size.height)
         }
         .preferredColorScheme(.dark)
+        .onChange(of: fullScreenImageURL) { newURL in
+            if let url = newURL {
+                ImmersiveWindowController.shared.show {
+                    FullScreenImageView(url: url, onClose: {
+                        fullScreenImageURL = nil
+                    }, navigateImage: { direction in
+                        navigateFullScreen(direction: direction)
+                    })
+                }
+            } else {
+                ImmersiveWindowController.shared.hide()
+            }
+        }
         .onChange(of: selectedItemURL) { newURL in
             updateMetadata(for: newURL)
         }
@@ -479,6 +562,116 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("o", modifiers: [.command])
             }
+        }
+    }
+    
+    private func copySelectedItemToClipboard() {
+        guard let url = selectedItemURL else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([url as NSURL])
+    }
+    
+    private func pasteFromClipboard() {
+        guard let targetFolder = currentFolderURL else { return }
+        let pasteboard = NSPasteboard.general
+        
+        var pastedSomething = false
+        
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
+            for sourceURL in urls where sourceURL.isFileURL {
+                let destinationURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
+                do {
+                    if !FileManager.default.fileExists(atPath: destinationURL.path) {
+                        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+                        pastedSomething = true
+                    }
+                } catch {
+                    print("Error copying file: \(error)")
+                }
+            }
+        } else if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage], let firstImage = images.first {
+            if let tiff = firstImage.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let pngData = bitmap.representation(using: .png, properties: [:]) {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+                let fileName = "Pasted Image \(formatter.string(from: Date())).png"
+                let destinationURL = targetFolder.appendingPathComponent(fileName)
+                do {
+                    try pngData.write(to: destinationURL)
+                    pastedSomething = true
+                } catch {
+                    print("Error saving image: \(error)")
+                }
+            }
+        }
+        
+        if pastedSomething {
+            loadFolder(url: targetFolder)
+        } else {
+            NSSound.beep() // Provide feedback if paste failed or was empty
+        }
+    }
+    
+    private func deleteSelectedItem() {
+        // Use fullScreenImageURL if in fullscreen, else selectedItemURL
+        let targetURL = fullScreenImageURL ?? selectedItemURL
+        guard let url = targetURL else { return }
+        
+        let allItems = folderContents.filter { !$0.isDirectory }
+        guard let currentIndex = allItems.firstIndex(where: { $0.url == url }) else { return }
+        
+        let nextURL: URL?
+        if currentIndex + 1 < allItems.count {
+            nextURL = allItems[currentIndex + 1].url
+        } else if currentIndex - 1 >= 0 {
+            nextURL = allItems[currentIndex - 1].url
+        } else {
+            nextURL = nil
+        }
+        
+        do {
+            do {
+                try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            } catch {
+                print("Trash failed (possibly SMB/Network drive). Permanently deleting... \(error)")
+                try FileManager.default.removeItem(at: url)
+            }
+            
+            // Remove locally to avoid heavy SMB reload
+            folderContents.removeAll(where: { $0.url == url })
+            
+            // Update selection and full screen seamlessly
+            selectedItemURL = nextURL
+            if fullScreenImageURL != nil {
+                fullScreenImageURL = nextURL
+            }
+        } catch {
+            print("Error deleting file: \(error)")
+            NSSound.beep()
+        }
+    }
+    
+    private func saveBookmark(for url: URL) {
+        do {
+            let bookmarkData = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+            UserDefaults.standard.set(bookmarkData, forKey: "lastFolderBookmark")
+        } catch {
+            print("Failed to save bookmark: \(error)")
+        }
+    }
+    
+    private func restoreBookmark() -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: "lastFolderBookmark") else { return nil }
+        var isStale = false
+        do {
+            let url = try URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale)
+            if isStale {
+                saveBookmark(for: url)
+            }
+            return url
+        } catch {
+            print("Failed to resolve bookmark: \(error)")
+            return nil
         }
     }
     
