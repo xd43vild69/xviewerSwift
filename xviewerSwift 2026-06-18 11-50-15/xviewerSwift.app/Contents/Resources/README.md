@@ -34,15 +34,10 @@ macOS es muy estricto con la seguridad; una app no puede leer archivos de tu dis
 
 ---
 
-# Create Application
+Distribuir
 
 Header change to anymac
 
 Menu - Product - Archive
-
-Custom - Next
-
-Copy App - Next
-
 
 

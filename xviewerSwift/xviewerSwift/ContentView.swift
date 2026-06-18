@@ -241,6 +241,7 @@ struct FullScreenImageView: View {
     
     @State private var nsImage: NSImage?
     @State private var isInverted = false
+    @State private var rotationAngle: Double = 0.0
     @StateObject private var zoomState = ZoomState()
     
     var body: some View {
@@ -262,6 +263,8 @@ struct FullScreenImageView: View {
                             .scaledToFit()
                     }
                 }
+                    .rotationEffect(.degrees(rotationAngle), anchor: .center)
+                    .animation(.easeInOut(duration: 0.2), value: rotationAngle)
                     .padding()
                     .scaleEffect(max(0.1, zoomState.totalZoom + zoomState.currentZoom))
                     .offset(x: zoomState.totalOffset.width + zoomState.currentOffset.width, y: zoomState.totalOffset.height + zoomState.currentOffset.height)
@@ -309,7 +312,13 @@ struct FullScreenImageView: View {
             VStack {
                 HStack {
                     Spacer()
-                    Button(action: { onClose() }) {
+                    Button(action: { 
+                        if rotationAngle != 0.0 {
+                            withAnimation(nil) { rotationAngle = 0.0 }
+                        } else {
+                            onClose() 
+                        }
+                    }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.largeTitle)
                             .foregroundColor(.white)
@@ -329,6 +338,18 @@ struct FullScreenImageView: View {
                 .keyboardShortcut(.rightArrow, modifiers: [])
                 .opacity(0)
                 
+            Button(action: { rotationAngle -= 90.0 }) { Text("") }
+                .keyboardShortcut(.leftArrow, modifiers: [.command])
+                .opacity(0)
+
+            Button(action: { rotationAngle += 90.0 }) { Text("") }
+                .keyboardShortcut(.rightArrow, modifiers: [.command])
+                .opacity(0)
+
+            Button(action: { withAnimation(nil) { rotationAngle = 0.0 } }) { Text("") }
+                .keyboardShortcut(.delete, modifiers: [])
+                .opacity(0)
+                
             Button(action: { isInverted.toggle() }) { Text("") }
                 .keyboardShortcut("i", modifiers: [.command])
                 .opacity(0)
@@ -338,6 +359,7 @@ struct FullScreenImageView: View {
         .onChange(of: url) { oldURL, newURL in
             nsImage = nil
             zoomState.reset()
+            withAnimation(nil) { rotationAngle = 0.0 }
             loadImage(from: newURL)
         }
     }
