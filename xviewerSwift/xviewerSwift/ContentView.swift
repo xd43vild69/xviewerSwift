@@ -162,7 +162,11 @@ class ImmersiveWindowController {
     
     func show<Content: View>(@ViewBuilder content: @escaping () -> Content) {
         if let existingWindow = window {
-            existingWindow.contentView = NSHostingView(rootView: content())
+            if let hostingView = existingWindow.contentView as? NSHostingView<Content> {
+                hostingView.rootView = content()
+            } else {
+                existingWindow.contentView = NSHostingView(rootView: content())
+            }
             return
         }
         
@@ -236,6 +240,7 @@ struct FullScreenImageView: View {
     let navigateImage: (Int) -> Void
     
     @State private var nsImage: NSImage?
+    @State private var isInverted = false
     @StateObject private var zoomState = ZoomState()
     
     var body: some View {
@@ -245,9 +250,18 @@ struct FullScreenImageView: View {
                 .onTapGesture { onClose() }
             
             if let image = nsImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
+                Group {
+                    if isInverted {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .colorInvert()
+                    } else {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                    }
+                }
                     .padding()
                     .scaleEffect(max(0.1, zoomState.totalZoom + zoomState.currentZoom))
                     .offset(x: zoomState.totalOffset.width + zoomState.currentOffset.width, y: zoomState.totalOffset.height + zoomState.currentOffset.height)
@@ -313,6 +327,10 @@ struct FullScreenImageView: View {
             
             Button(action: { navigateImage(1) }) { Text("") }
                 .keyboardShortcut(.rightArrow, modifiers: [])
+                .opacity(0)
+                
+            Button(action: { isInverted.toggle() }) { Text("") }
+                .keyboardShortcut("i", modifiers: [.command])
                 .opacity(0)
         }
         .zIndex(1)
