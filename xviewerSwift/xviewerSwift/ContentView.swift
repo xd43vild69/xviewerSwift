@@ -369,6 +369,7 @@ struct GridItemCell: View {
     let loadFolderAction: (URL) -> Void
     let moveItemAction: (URL) -> Void
     let createNewFolderAction: () -> Void
+    let openWithKritaAction: (URL) -> Void
     
     var body: some View {
         VStack {
@@ -441,6 +442,12 @@ struct GridItemCell: View {
             }
             Button { createNewFolderAction() } label: {
                 Label("New Folder", systemImage: "folder.badge.plus")
+            }
+            if !item.isDirectory {
+                Divider()
+                Button { openWithKritaAction(item.url) } label: {
+                    Label("Open with Krita", systemImage: "paintpalette")
+                }
             }
         }
     }
@@ -557,6 +564,9 @@ struct ContentView: View {
                                 },
                                 createNewFolderAction: {
                                     createNewFolder()
+                                },
+                                openWithKritaAction: { url in
+                                    openWithKrita(url)
                                 }
                             )
                             .id(item.url)
@@ -948,6 +958,31 @@ struct ContentView: View {
             } catch {
                 print("Error creating folder: \(error)")
                 NSSound.beep()
+            }
+        }
+    }
+    
+    private func openWithKrita(_ url: URL) {
+        var targets = selectedItemURLs
+        if !targets.contains(url) {
+            targets.insert(url)
+        }
+        
+        let accessed = securityScopedURL?.startAccessingSecurityScopedResource() ?? false
+        for target in targets {
+            _ = target.startAccessingSecurityScopedResource()
+        }
+        
+        let kritaURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "org.kde.krita") 
+                       ?? URL(fileURLWithPath: "/Applications/Krita.app")
+                       
+        let config = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.open(Array(targets), withApplicationAt: kritaURL, configuration: config) { _, error in
+            for target in targets {
+                target.stopAccessingSecurityScopedResource()
+            }
+            if let error = error {
+                print("Error opening with Krita: \(error)")
             }
         }
     }

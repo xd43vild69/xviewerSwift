@@ -1,5 +1,3 @@
-
-
 size preview images
 
 rename files on folder
@@ -9,7 +7,3 @@ click derecho debe mostrar opcoines avanzadas como: ordenar - pegar - etc
 
 
 abrir con krita
-
-new folder
-
-permitir varias selecciones
