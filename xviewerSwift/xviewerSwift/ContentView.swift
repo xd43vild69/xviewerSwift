@@ -402,6 +402,7 @@ struct ContentView: View {
                 }) {
                     Label("Select Folder", systemImage: "folder.badge.plus")
                 }
+                .keyboardShortcut("o", modifiers: [.command])
             }
         }
     }
