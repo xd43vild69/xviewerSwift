@@ -7,11 +7,129 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import QuickLookThumbnailing
 
 struct FileItem: Identifiable, Hashable {
     let id = UUID()
     let url: URL
     let isDirectory: Bool
+}
+
+struct FileItemView: View {
+    let url: URL
+    @State private var thumbnail: NSImage?
+    
+    var body: some View {
+        Group {
+            if let thumbnail = thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 80, height: 80)
+                    .clipped()
+                    .cornerRadius(8)
+            } else {
+                Color.gray.opacity(0.3)
+                    .frame(width: 80, height: 80)
+                    .cornerRadius(8)
+                    .onAppear {
+                        loadThumbnail()
+                    }
+            }
+        }
+    }
+    
+    private func loadThumbnail() {
+        let size = CGSize(width: 160, height: 160)
+        let request = QLThumbnailGenerator.Request(
+            fileAt: url,
+            size: size,
+            scale: 2.0,
+            representationTypes: .thumbnail
+        )
+        
+        QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { representation, error in
+            if let nsImage = representation?.nsImage {
+                DispatchQueue.main.async {
+                    self.thumbnail = nsImage
+                }
+            } else {
+                DispatchQueue.global(qos: .background).async {
+                    if let img = NSImage(contentsOf: url) {
+                        DispatchQueue.main.async {
+                            self.thumbnail = img
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct FullScreenImageView: View {
+    let url: URL
+    let onClose: () -> Void
+    let navigateImage: (Int) -> Void
+    
+    @State private var nsImage: NSImage?
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.9)
+                .ignoresSafeArea()
+                .onTapGesture { onClose() }
+            
+            if let image = nsImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding()
+                    .onTapGesture { onClose() }
+            } else {
+                ProgressView()
+                    .controlSize(.large)
+            }
+            
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: { onClose() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.largeTitle)
+                            .foregroundColor(.white)
+                            .padding()
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .keyboardShortcut(.escape, modifiers: [])
+                }
+                Spacer()
+            }
+            
+            Button(action: { navigateImage(-1) }) { Text("") }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .opacity(0)
+            
+            Button(action: { navigateImage(1) }) { Text("") }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                .opacity(0)
+        }
+        .zIndex(1)
+        .onAppear { loadImage(from: url) }
+        .onChange(of: url) { newURL in
+            nsImage = nil
+            loadImage(from: newURL)
+        }
+    }
+    
+    private func loadImage(from url: URL) {
+        DispatchQueue.global(qos: .userInteractive).async {
+            if let img = NSImage(contentsOf: url) {
+                DispatchQueue.main.async {
+                    self.nsImage = img
+                }
+            }
+        }
+    }
 }
 
 struct ContentView: View {
@@ -28,164 +146,137 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack {
-            HStack(spacing: 0) {
-                // Left Panel
-                VStack {
-                    Button("Select Folder") {
-                        isShowingFolderPicker = true
-                    }
-                    .padding()
-                    
-                    if let url = currentFolderURL {
-                        Text("Selected: \(url.lastPathComponent)")
-                            .font(.caption)
-                            .padding(.horizontal)
-                    }
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.gray.opacity(0.1))
-                .fileImporter(
-                    isPresented: $isShowingFolderPicker,
-                    allowedContentTypes: [.folder],
-                    allowsMultipleSelection: false
-                ) { result in
-                    switch result {
-                    case .success(let urls):
-                        if let url = urls.first {
-                            securityScopedURL?.stopAccessingSecurityScopedResource()
-                            if url.startAccessingSecurityScopedResource() {
-                                securityScopedURL = url
-                            }
-                            loadFolder(url: url)
-                        }
-                    case .failure(let error):
-                        print("Error selecting folder: \(error.localizedDescription)")
-                    }
-                }
-                
-                // Right Panel
-                GeometryReader { geometry in
-                    let columns = max(1, Int(geometry.size.width / 116))
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 16) {
-                            ForEach(folderContents) { item in
-                                VStack {
-                                    if item.isDirectory {
-                                        Image(systemName: "folder.fill")
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 50, height: 50)
-                                            .foregroundColor(.blue)
-                                    } else {
-                                        if let nsImage = NSImage(contentsOf: item.url) {
-                                            Image(nsImage: nsImage)
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 80, height: 80)
-                                                .clipped()
-                                                .cornerRadius(8)
-                                        } else {
-                                            Color.gray.frame(width: 80, height: 80).cornerRadius(8)
-                                        }
-                                    }
-                                    Text(item.url.lastPathComponent)
-                                        .font(.caption)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                }
-                                .padding(8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(selectedItemURL == item.url ? Color.blue.opacity(0.2) : Color.clear)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(selectedItemURL == item.url ? Color.blue : Color.clear, lineWidth: 2)
-                                )
-                                .help(item.url.lastPathComponent)
-                                .onTapGesture(count: 2) {
-                                    selectedItemURL = item.url
-                                    if item.isDirectory {
-                                        loadFolder(url: item.url)
-                                    } else {
-                                        fullScreenImageURL = item.url
-                                    }
-                                }
-                                .onTapGesture(count: 1) {
-                                    selectedItemURL = item.url
-                                }
-                            }
-                        }
-                        .padding()
-                    }
-                    .onChange(of: columns) { newValue in
-                        currentColumnCount = newValue
-                    }
-                    .onAppear {
-                        currentColumnCount = columns
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.white)
-            }
-            
-            if let url = fullScreenImageURL, let nsImage = NSImage(contentsOf: url) {
-                ZStack {
-                    Color.black.opacity(0.9)
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            fullScreenImageURL = nil
-                        }
-                    
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .scaledToFit()
-                        .padding()
-                        .onTapGesture {
-                            fullScreenImageURL = nil
-                        }
-                    
+        GeometryReader { mainGeometry in
+            ZStack {
+                HStack(spacing: 0) {
+                    // Left Panel
                     VStack {
-                        HStack {
-                            Spacer()
-                            Button(action: {
-                                fullScreenImageURL = nil
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.largeTitle)
-                                    .foregroundColor(.white)
-                                    .padding()
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .keyboardShortcut(.escape, modifiers: [])
+                        Button("Select Folder") {
+                            isShowingFolderPicker = true
+                        }
+                        .padding()
+                        
+                        if let url = currentFolderURL {
+                            Text("Selected: \(url.lastPathComponent)")
+                                .font(.caption)
+                                .padding(.horizontal)
                         }
                         Spacer()
                     }
+                    .frame(width: mainGeometry.size.width * 0.1)
+                    .frame(maxHeight: .infinity)
+                    .background(Color.gray.opacity(0.1))
+                    .fileImporter(
+                        isPresented: $isShowingFolderPicker,
+                        allowedContentTypes: [.folder],
+                        allowsMultipleSelection: false
+                    ) { result in
+                        switch result {
+                        case .success(let urls):
+                            if let url = urls.first {
+                                securityScopedURL?.stopAccessingSecurityScopedResource()
+                                if url.startAccessingSecurityScopedResource() {
+                                    securityScopedURL = url
+                                }
+                                loadFolder(url: url)
+                            }
+                        case .failure(let error):
+                            print("Error selecting folder: \(error.localizedDescription)")
+                        }
+                    }
+                    
+                    // Right Panel
+                    GeometryReader { geometry in
+                        let columns = max(1, Int(geometry.size.width / 116))
+                        ScrollView {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 16) {
+                                ForEach(folderContents) { item in
+                                    VStack {
+                                        if item.isDirectory {
+                                            Image(systemName: "folder.fill")
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(width: 50, height: 50)
+                                                .foregroundColor(.blue)
+                                        } else {
+                                            FileItemView(url: item.url)
+                                        }
+                                        Text(item.url.lastPathComponent)
+                                            .font(.caption)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                    .padding(8)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(selectedItemURL == item.url ? Color.blue.opacity(0.2) : Color.clear)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(selectedItemURL == item.url ? Color.blue : Color.clear, lineWidth: 2)
+                                    )
+                                    .help(item.url.lastPathComponent)
+                                    .onTapGesture(count: 2) {
+                                        selectedItemURL = item.url
+                                        if item.isDirectory {
+                                            loadFolder(url: item.url)
+                                        } else {
+                                            fullScreenImageURL = item.url
+                                        }
+                                    }
+                                    .onTapGesture(count: 1) {
+                                        selectedItemURL = item.url
+                                    }
+                                }
+                            }
+                            .padding()
+                        }
+                        .onChange(of: columns) { newValue in
+                            currentColumnCount = newValue
+                        }
+                        .onAppear {
+                            currentColumnCount = columns
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .zIndex(1)
+                
+                if let url = fullScreenImageURL {
+                    FullScreenImageView(url: url, onClose: {
+                        fullScreenImageURL = nil
+                    }, navigateImage: { direction in
+                        navigateFullScreen(direction: direction)
+                    })
+                }
+                
+                // Global Shortcuts
+                Button(action: { navigateUp() }) { Text("") }
+                    .keyboardShortcut(.upArrow, modifiers: [.command])
+                    .opacity(0)
+                    
+                Button(action: { handleUpArrow() }) { Text("") }
+                    .keyboardShortcut(.upArrow, modifiers: [])
+                    .opacity(0)
+                    
+                Button(action: { handleDownArrow() }) { Text("") }
+                    .keyboardShortcut(.downArrow, modifiers: [])
+                    .opacity(0)
+                    
+                Button(action: { handleLeftArrow() }) { Text("") }
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                    .opacity(0)
+                    
+                Button(action: { handleRightArrow() }) { Text("") }
+                    .keyboardShortcut(.rightArrow, modifiers: [])
+                    .opacity(0)
+                    
+                Button(action: { handleEnter() }) { Text("") }
+                    .keyboardShortcut(.space, modifiers: [])
+                    .opacity(0)
             }
-            
-            // Global Shortcuts
-            Button(action: { navigateUp() }) { Text("").hidden() }
-                .keyboardShortcut(.upArrow, modifiers: [.command])
-                
-            Button(action: { handleUpArrow() }) { Text("").hidden() }
-                .keyboardShortcut(.upArrow, modifiers: [])
-                
-            Button(action: { handleDownArrow() }) { Text("").hidden() }
-                .keyboardShortcut(.downArrow, modifiers: [])
-                
-            Button(action: { handleLeftArrow() }) { Text("").hidden() }
-                .keyboardShortcut(.leftArrow, modifiers: [])
-                
-            Button(action: { handleRightArrow() }) { Text("").hidden() }
-                .keyboardShortcut(.rightArrow, modifiers: [])
-                
-            Button(action: { handleEnter() }) { Text("").hidden() }
-                .keyboardShortcut(.return, modifiers: [])
+            .frame(width: mainGeometry.size.width, height: mainGeometry.size.height)
         }
+        .preferredColorScheme(.dark)
     }
     
     private func handleUpArrow() {
