@@ -143,12 +143,49 @@ struct FileItemView: View {
     }
 }
 
+class ZoomState: ObservableObject {
+    @Published var currentZoom: CGFloat = 0.0
+    @Published var totalZoom: CGFloat = 1.0
+    @Published var currentOffset: CGSize = .zero
+    @Published var totalOffset: CGSize = .zero
+    
+    private var monitor: Any?
+    
+    init() {
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self = self else { return event }
+            if self.totalZoom > 1.0 {
+                DispatchQueue.main.async {
+                    self.totalOffset.width += event.scrollingDeltaX
+                    self.totalOffset.height += event.scrollingDeltaY
+                }
+                return nil // Consume scroll event
+            }
+            return event
+        }
+    }
+    
+    deinit {
+        if let monitor = monitor {
+            NSEvent.removeMonitor(monitor)
+        }
+    }
+    
+    func reset() {
+        totalZoom = 1.0
+        currentZoom = 0.0
+        totalOffset = .zero
+        currentOffset = .zero
+    }
+}
+
 struct FullScreenImageView: View {
     let url: URL
     let onClose: () -> Void
     let navigateImage: (Int) -> Void
     
     @State private var nsImage: NSImage?
+    @StateObject private var zoomState = ZoomState()
     
     var body: some View {
         ZStack {
@@ -161,6 +198,43 @@ struct FullScreenImageView: View {
                     .resizable()
                     .scaledToFit()
                     .padding()
+                    .scaleEffect(max(0.1, zoomState.totalZoom + zoomState.currentZoom))
+                    .offset(x: zoomState.totalOffset.width + zoomState.currentOffset.width, y: zoomState.totalOffset.height + zoomState.currentOffset.height)
+                    .simultaneousGesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                zoomState.currentZoom = value - 1
+                            }
+                            .onEnded { value in
+                                zoomState.totalZoom += zoomState.currentZoom
+                                zoomState.currentZoom = 0
+                                if zoomState.totalZoom <= 1.0 {
+                                    withAnimation(.spring()) {
+                                        zoomState.totalZoom = 1.0
+                                        zoomState.totalOffset = .zero
+                                    }
+                                } else if zoomState.totalZoom > 5.0 {
+                                    withAnimation(.spring()) {
+                                        zoomState.totalZoom = 5.0
+                                    }
+                                }
+                            }
+                    )
+                    .simultaneousGesture(
+                        DragGesture()
+                            .onChanged { value in
+                                if zoomState.totalZoom > 1.0 {
+                                    zoomState.currentOffset = value.translation
+                                }
+                            }
+                            .onEnded { value in
+                                if zoomState.totalZoom > 1.0 {
+                                    zoomState.totalOffset.width += zoomState.currentOffset.width
+                                    zoomState.totalOffset.height += zoomState.currentOffset.height
+                                    zoomState.currentOffset = .zero
+                                }
+                            }
+                    )
                     .onTapGesture { onClose() }
             } else {
                 ProgressView()
@@ -194,6 +268,7 @@ struct FullScreenImageView: View {
         .onAppear { loadImage(from: url) }
         .onChange(of: url) { newURL in
             nsImage = nil
+            zoomState.reset()
             loadImage(from: newURL)
         }
     }
