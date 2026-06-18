@@ -148,11 +148,8 @@ class SidebarManager: ObservableObject {
             do {
                 url = try URL(resolvingBookmarkData: pItem.bookmarkData, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale)
             } catch {
-                do {
-                    url = try URL(resolvingBookmarkData: pItem.bookmarkData, options: [], relativeTo: nil, bookmarkDataIsStale: &isStale)
-                } catch {
-                    print("Failed to resolve bookmark: \(error)")
-                }
+                print("Failed to resolve secure bookmark: \(error)")
+                continue
             }
             if let validURL = url {
                 _ = validURL.startAccessingSecurityScopedResource()

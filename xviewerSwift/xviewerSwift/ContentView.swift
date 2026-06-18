@@ -982,7 +982,7 @@ struct ContentView: View {
             }
             return url
         } catch {
-            print("Failed to resolve bookmark: \(error)")
+            print("Failed to restore secure last folder bookmark: \(error)")
             return nil
         }
     }
