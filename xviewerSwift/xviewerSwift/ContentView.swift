@@ -21,6 +21,10 @@ struct ContentView: View {
     @State private var folderContents: [FileItem] = []
     @State private var fullScreenImageURL: URL?
 
+    private var imageItems: [FileItem] {
+        folderContents.filter { !$0.isDirectory }
+    }
+
     var body: some View {
         ZStack {
             HStack(spacing: 0) {
@@ -108,9 +112,7 @@ struct ContentView: View {
                     Color.black.opacity(0.9)
                         .ignoresSafeArea()
                         .onTapGesture {
-                            withAnimation {
-                                fullScreenImageURL = nil
-                            }
+                            fullScreenImageURL = nil
                         }
                     
                     Image(nsImage: nsImage)
@@ -118,18 +120,14 @@ struct ContentView: View {
                         .scaledToFit()
                         .padding()
                         .onTapGesture {
-                            withAnimation {
-                                fullScreenImageURL = nil
-                            }
+                            fullScreenImageURL = nil
                         }
                     
                     VStack {
                         HStack {
                             Spacer()
                             Button(action: {
-                                withAnimation {
-                                    fullScreenImageURL = nil
-                                }
+                                fullScreenImageURL = nil
                             }) {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.largeTitle)
@@ -137,15 +135,32 @@ struct ContentView: View {
                                     .padding()
                             }
                             .buttonStyle(PlainButtonStyle())
+                            .keyboardShortcut(.escape, modifiers: [])
                         }
                         Spacer()
                     }
+                    
+                    // Keyboard Shortcuts for Navigation
+                    Button(action: { navigateImage(direction: -1) }) { Text("").hidden() }
+                        .keyboardShortcut(.leftArrow, modifiers: [])
+                    
+                    Button(action: { navigateImage(direction: 1) }) { Text("").hidden() }
+                        .keyboardShortcut(.rightArrow, modifiers: [])
                 }
-                .transition(.opacity)
                 .zIndex(1)
             }
         }
-        .animation(.easeInOut, value: fullScreenImageURL)
+    }
+    
+    private func navigateImage(direction: Int) {
+        guard let currentURL = fullScreenImageURL else { return }
+        let images = imageItems
+        guard let currentIndex = images.firstIndex(where: { $0.url == currentURL }) else { return }
+        
+        let newIndex = currentIndex + direction
+        if newIndex >= 0 && newIndex < images.count {
+            fullScreenImageURL = images[newIndex].url
+        }
     }
     
     private func loadFolder(url: URL) {
