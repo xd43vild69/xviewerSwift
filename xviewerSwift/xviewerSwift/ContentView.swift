@@ -486,35 +486,27 @@ struct ContentView: View {
     }
 
     private var leftPanel: some View {
-        VStack {
-            if let url = currentFolderURL {
-                Text("Selected: \(url.lastPathComponent)")
-                    .font(.caption)
-                    .padding(.horizontal)
-            }
-            Spacer()
-        }
-        .frame(maxHeight: .infinity)
-        .background(Color.gray.opacity(0.1))
-        .fileImporter(
-            isPresented: $isShowingFolderPicker,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first {
-                    securityScopedURL?.stopAccessingSecurityScopedResource()
-                    if url.startAccessingSecurityScopedResource() {
-                        securityScopedURL = url
+        SidebarNavigationView(selectedFolderURL: $currentFolderURL)
+            .fileImporter(
+                isPresented: $isShowingFolderPicker,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        securityScopedURL?.stopAccessingSecurityScopedResource()
+                        if url.startAccessingSecurityScopedResource() {
+                            securityScopedURL = url
+                        }
+                        saveBookmark(for: url)
+                        // Trigger reload implicitly by updating currentFolderURL
+                        currentFolderURL = url
                     }
-                    saveBookmark(for: url)
-                    loadFolder(url: url)
+                case .failure(let error):
+                    print("Error selecting folder: \(error.localizedDescription)")
                 }
-            case .failure(let error):
-                print("Error selecting folder: \(error.localizedDescription)")
             }
-        }
     }
     
     @ViewBuilder
@@ -625,10 +617,10 @@ struct ContentView: View {
                 currentColumnCount = columns
                 if let url = restoreBookmark(), url.startAccessingSecurityScopedResource() {
                     securityScopedURL = url
-                    loadFolder(url: url)
+                    currentFolderURL = url
                 } else {
                     let home = FileManager.default.homeDirectoryForCurrentUser
-                    loadFolder(url: home)
+                    currentFolderURL = home
                 }
             }
         }
@@ -766,6 +758,11 @@ struct ContentView: View {
         }
         .onChange(of: activeItemURL) { oldURL, newURL in
             updateMetadata(for: newURL)
+        }
+        .onChange(of: currentFolderURL) { oldURL, newURL in
+            if let url = newURL {
+                loadFolder(url: url)
+            }
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
