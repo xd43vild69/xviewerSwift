@@ -20,6 +20,8 @@ struct ContentView: View {
     @State private var securityScopedURL: URL?
     @State private var folderContents: [FileItem] = []
     @State private var fullScreenImageURL: URL?
+    @State private var selectedItemURL: URL?
+    @State private var currentColumnCount: Int = 1
 
     private var imageItems: [FileItem] {
         folderContents.filter { !$0.isDirectory }
@@ -64,48 +66,66 @@ struct ContentView: View {
                 }
                 
                 // Right Panel
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 16) {
-                        ForEach(folderContents) { item in
-                            if item.isDirectory {
+                GeometryReader { geometry in
+                    let columns = max(1, Int(geometry.size.width / 116))
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 16) {
+                            ForEach(folderContents) { item in
                                 VStack {
-                                    Image(systemName: "folder.fill")
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 50, height: 50)
-                                        .foregroundColor(.blue)
+                                    if item.isDirectory {
+                                        Image(systemName: "folder.fill")
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(width: 50, height: 50)
+                                            .foregroundColor(.blue)
+                                    } else {
+                                        if let nsImage = NSImage(contentsOf: item.url) {
+                                            Image(nsImage: nsImage)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 80, height: 80)
+                                                .clipped()
+                                                .cornerRadius(8)
+                                        } else {
+                                            Color.gray.frame(width: 80, height: 80).cornerRadius(8)
+                                        }
+                                    }
                                     Text(item.url.lastPathComponent)
                                         .font(.caption)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
                                 }
-                                .onTapGesture {
-                                    loadFolder(url: item.url)
-                                }
+                                .padding(8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(selectedItemURL == item.url ? Color.blue.opacity(0.2) : Color.clear)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(selectedItemURL == item.url ? Color.blue : Color.clear, lineWidth: 2)
+                                )
                                 .help(item.url.lastPathComponent)
-                            } else {
-                                if let nsImage = NSImage(contentsOf: item.url) {
-                                    VStack {
-                                        Image(nsImage: nsImage)
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 80, height: 80)
-                                            .clipped()
-                                            .cornerRadius(8)
-                                        Text(item.url.lastPathComponent)
-                                            .font(.caption)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    }
-                                    .help(item.url.lastPathComponent)
-                                    .onTapGesture(count: 2) {
+                                .onTapGesture(count: 2) {
+                                    selectedItemURL = item.url
+                                    if item.isDirectory {
+                                        loadFolder(url: item.url)
+                                    } else {
                                         fullScreenImageURL = item.url
                                     }
                                 }
+                                .onTapGesture(count: 1) {
+                                    selectedItemURL = item.url
+                                }
                             }
                         }
+                        .padding()
                     }
-                    .padding()
+                    .onChange(of: columns) { newValue in
+                        currentColumnCount = newValue
+                    }
+                    .onAppear {
+                        currentColumnCount = columns
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.white)
@@ -143,13 +163,6 @@ struct ContentView: View {
                         }
                         Spacer()
                     }
-                    
-                    // Keyboard Shortcuts for Navigation
-                    Button(action: { navigateImage(direction: -1) }) { Text("").hidden() }
-                        .keyboardShortcut(.leftArrow, modifiers: [])
-                    
-                    Button(action: { navigateImage(direction: 1) }) { Text("").hidden() }
-                        .keyboardShortcut(.rightArrow, modifiers: [])
                 }
                 .zIndex(1)
             }
@@ -157,10 +170,81 @@ struct ContentView: View {
             // Global Shortcuts
             Button(action: { navigateUp() }) { Text("").hidden() }
                 .keyboardShortcut(.upArrow, modifiers: [.command])
+                
+            Button(action: { handleUpArrow() }) { Text("").hidden() }
+                .keyboardShortcut(.upArrow, modifiers: [])
+                
+            Button(action: { handleDownArrow() }) { Text("").hidden() }
+                .keyboardShortcut(.downArrow, modifiers: [])
+                
+            Button(action: { handleLeftArrow() }) { Text("").hidden() }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                
+            Button(action: { handleRightArrow() }) { Text("").hidden() }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                
+            Button(action: { handleEnter() }) { Text("").hidden() }
+                .keyboardShortcut(.return, modifiers: [])
         }
     }
     
-    private func navigateImage(direction: Int) {
+    private func handleUpArrow() {
+        if fullScreenImageURL == nil {
+            navigateGridRow(direction: -1)
+        }
+    }
+    
+    private func handleDownArrow() {
+        if fullScreenImageURL == nil {
+            navigateGridRow(direction: 1)
+        }
+    }
+    
+    private func handleLeftArrow() {
+        if fullScreenImageURL != nil {
+            navigateFullScreen(direction: -1)
+        } else {
+            navigateGrid(direction: -1)
+        }
+    }
+    
+    private func handleRightArrow() {
+        if fullScreenImageURL != nil {
+            navigateFullScreen(direction: 1)
+        } else {
+            navigateGrid(direction: 1)
+        }
+    }
+    
+    private func navigateGridRow(direction: Int) {
+        guard !folderContents.isEmpty else { return }
+        guard let currentSelected = selectedItemURL, let currentIndex = folderContents.firstIndex(where: { $0.url == currentSelected }) else {
+            selectedItemURL = folderContents.first?.url
+            return
+        }
+        let newIndex = currentIndex + (direction * currentColumnCount)
+        if newIndex >= 0 && newIndex < folderContents.count {
+            selectedItemURL = folderContents[newIndex].url
+        } else if newIndex < 0 {
+            selectedItemURL = folderContents.first?.url
+        } else if newIndex >= folderContents.count {
+            selectedItemURL = folderContents.last?.url
+        }
+    }
+    
+    private func navigateGrid(direction: Int) {
+        guard !folderContents.isEmpty else { return }
+        guard let currentSelected = selectedItemURL, let currentIndex = folderContents.firstIndex(where: { $0.url == currentSelected }) else {
+            selectedItemURL = folderContents.first?.url
+            return
+        }
+        let newIndex = currentIndex + direction
+        if newIndex >= 0 && newIndex < folderContents.count {
+            selectedItemURL = folderContents[newIndex].url
+        }
+    }
+    
+    private func navigateFullScreen(direction: Int) {
         guard let currentURL = fullScreenImageURL else { return }
         let images = imageItems
         guard let currentIndex = images.firstIndex(where: { $0.url == currentURL }) else { return }
@@ -171,10 +255,22 @@ struct ContentView: View {
         }
     }
     
+    private func handleEnter() {
+        guard fullScreenImageURL == nil else { return }
+        guard let selected = selectedItemURL else { return }
+        
+        if let item = folderContents.first(where: { $0.url == selected }) {
+            if item.isDirectory {
+                loadFolder(url: item.url)
+            } else {
+                fullScreenImageURL = item.url
+            }
+        }
+    }
+    
     private func navigateUp() {
         guard let current = currentFolderURL, let root = securityScopedURL else { return }
         
-        // Prevent navigating above the originally selected folder
         if current.standardizedFileURL.path != root.standardizedFileURL.path {
             let parentURL = current.deletingLastPathComponent()
             loadFolder(url: parentURL)
@@ -211,6 +307,7 @@ struct ContentView: View {
             
             DispatchQueue.main.async {
                 self.folderContents = items
+                self.selectedItemURL = items.first?.url
             }
         } catch {
             print("Error loading directory: \(error.localizedDescription)")
