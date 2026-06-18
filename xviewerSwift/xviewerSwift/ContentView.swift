@@ -489,6 +489,7 @@ struct ContentView: View {
 
     @State private var isShowingBulkRenameAlert = false
     @State private var bulkRenameBaseName: String = ""
+    @State private var showCopiedFeedback: Bool = false
 
     private var imageItems: [FileItem] {
         folderContents.filter { !$0.isDirectory }
@@ -728,11 +729,48 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Divider()
             HStack {
+                if let url = activeItemURL {
+                    Text(url.path)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .onHover { isHovering in
+                            if isHovering {
+                                NSCursor.pointingHand.push()
+                            } else {
+                                NSCursor.pop()
+                            }
+                        }
+                        .onTapGesture {
+                            let pasteboard = NSPasteboard.general
+                            pasteboard.clearContents()
+                            pasteboard.setString(url.path, forType: .string)
+                            
+                            withAnimation {
+                                showCopiedFeedback = true
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                                withAnimation {
+                                    showCopiedFeedback = false
+                                }
+                            }
+                        }
+                        .opacity(showCopiedFeedback ? 0.3 : 1.0)
+                }
+                
+                if showCopiedFeedback {
+                    Text("(Copied to clipboard)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.green)
+                        .transition(.opacity)
+                }
+                
+                Spacer()
+                
                 Text(metadataString)
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
-                    .lineLimit(1)
-                Spacer()
             }
             .padding(.horizontal, 10)
             .frame(height: 24)

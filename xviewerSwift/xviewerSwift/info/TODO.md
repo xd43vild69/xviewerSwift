@@ -1,6 +1,8 @@
 - 🔴 en status bar necesito mostrar ruta completa de archivo y su nombre
     El nombre debe permitirse ser copiado
 
+- contextmenu nueva opcion properties, cuando se selecciona abre una ventana con el metadato de la imagen, importante leer la informacion generada por comfyui del prompt que construyo dicha imagen
+
 - 🟡 Icono de la aplicacion
 
 - 🟡 terminal integrated into the app, this is the most avance and sync feature
