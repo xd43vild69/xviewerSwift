@@ -140,105 +140,155 @@ struct ContentView: View {
     @State private var fullScreenImageURL: URL?
     @State private var selectedItemURL: URL?
     @State private var currentColumnCount: Int = 1
+    @State private var metadataString: String = ""
 
     private var imageItems: [FileItem] {
         folderContents.filter { !$0.isDirectory }
+    }
+
+    private var leftPanel: some View {
+        VStack {
+            if let url = currentFolderURL {
+                Text("Selected: \(url.lastPathComponent)")
+                    .font(.caption)
+                    .padding(.horizontal)
+            }
+            Spacer()
+        }
+        .frame(maxHeight: .infinity)
+        .background(Color.gray.opacity(0.1))
+        .fileImporter(
+            isPresented: $isShowingFolderPicker,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first {
+                    securityScopedURL?.stopAccessingSecurityScopedResource()
+                    if url.startAccessingSecurityScopedResource() {
+                        securityScopedURL = url
+                    }
+                    loadFolder(url: url)
+                }
+            case .failure(let error):
+                print("Error selecting folder: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private var rightPanel: some View {
+        GeometryReader { geometry in
+            let columns = max(1, Int(geometry.size.width / 116))
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 16) {
+                    ForEach(folderContents) { item in
+                        VStack {
+                            if item.isDirectory {
+                                Image(systemName: "folder.fill")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 50, height: 50)
+                                    .foregroundColor(.blue)
+                            } else {
+                                FileItemView(url: item.url)
+                            }
+                            Text(item.url.lastPathComponent)
+                                .font(.caption)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(selectedItemURL == item.url ? Color.blue.opacity(0.2) : Color.clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(selectedItemURL == item.url ? Color.blue : Color.clear, lineWidth: 2)
+                        )
+                        .help(item.url.lastPathComponent)
+                        .onTapGesture(count: 2) {
+                            selectedItemURL = item.url
+                            if item.isDirectory {
+                                loadFolder(url: item.url)
+                            } else {
+                                fullScreenImageURL = item.url
+                            }
+                        }
+                        .onTapGesture(count: 1) {
+                            selectedItemURL = item.url
+                        }
+                    }
+                }
+                .padding()
+            }
+            .onChange(of: columns) { newValue in
+                currentColumnCount = newValue
+            }
+            .onAppear {
+                currentColumnCount = columns
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.clear)
+    }
+
+    private var shortcutsGroup: some View {
+        Group {
+            Button(action: { navigateUp() }) { Text("") }
+                .keyboardShortcut(.upArrow, modifiers: [.command])
+                .opacity(0)
+                
+            Button(action: { handleUpArrow() }) { Text("") }
+                .keyboardShortcut(.upArrow, modifiers: [])
+                .opacity(0)
+                
+            Button(action: { handleDownArrow() }) { Text("") }
+                .keyboardShortcut(.downArrow, modifiers: [])
+                .opacity(0)
+                
+            Button(action: { handleLeftArrow() }) { Text("") }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .opacity(0)
+                
+            Button(action: { handleRightArrow() }) { Text("") }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                .opacity(0)
+                
+            Button(action: { handleEnter() }) { Text("") }
+                .keyboardShortcut(.space, modifiers: [])
+                .opacity(0)
+                
+            Button(action: { handleEnter() }) { Text("") }
+                .keyboardShortcut(.downArrow, modifiers: [.command])
+                .opacity(0)
+        }
+    }
+
+    private var statusBar: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack {
+                Text(metadataString)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(Color(NSColor.windowBackgroundColor))
+        }
     }
 
     var body: some View {
         GeometryReader { mainGeometry in
             ZStack {
                 HStack(spacing: 0) {
-                    // Left Panel
-                    VStack {
-                        Button("Select Folder") {
-                            isShowingFolderPicker = true
-                        }
-                        .padding()
-                        
-                        if let url = currentFolderURL {
-                            Text("Selected: \(url.lastPathComponent)")
-                                .font(.caption)
-                                .padding(.horizontal)
-                        }
-                        Spacer()
-                    }
-                    .frame(width: mainGeometry.size.width * 0.1)
-                    .frame(maxHeight: .infinity)
-                    .background(Color.gray.opacity(0.1))
-                    .fileImporter(
-                        isPresented: $isShowingFolderPicker,
-                        allowedContentTypes: [.folder],
-                        allowsMultipleSelection: false
-                    ) { result in
-                        switch result {
-                        case .success(let urls):
-                            if let url = urls.first {
-                                securityScopedURL?.stopAccessingSecurityScopedResource()
-                                if url.startAccessingSecurityScopedResource() {
-                                    securityScopedURL = url
-                                }
-                                loadFolder(url: url)
-                            }
-                        case .failure(let error):
-                            print("Error selecting folder: \(error.localizedDescription)")
-                        }
-                    }
-                    
-                    // Right Panel
-                    GeometryReader { geometry in
-                        let columns = max(1, Int(geometry.size.width / 116))
-                        ScrollView {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 16) {
-                                ForEach(folderContents) { item in
-                                    VStack {
-                                        if item.isDirectory {
-                                            Image(systemName: "folder.fill")
-                                                .resizable()
-                                                .scaledToFit()
-                                                .frame(width: 50, height: 50)
-                                                .foregroundColor(.blue)
-                                        } else {
-                                            FileItemView(url: item.url)
-                                        }
-                                        Text(item.url.lastPathComponent)
-                                            .font(.caption)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    }
-                                    .padding(8)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(selectedItemURL == item.url ? Color.blue.opacity(0.2) : Color.clear)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(selectedItemURL == item.url ? Color.blue : Color.clear, lineWidth: 2)
-                                    )
-                                    .help(item.url.lastPathComponent)
-                                    .onTapGesture(count: 2) {
-                                        selectedItemURL = item.url
-                                        if item.isDirectory {
-                                            loadFolder(url: item.url)
-                                        } else {
-                                            fullScreenImageURL = item.url
-                                        }
-                                    }
-                                    .onTapGesture(count: 1) {
-                                        selectedItemURL = item.url
-                                    }
-                                }
-                            }
-                            .padding()
-                        }
-                        .onChange(of: columns) { newValue in
-                            currentColumnCount = newValue
-                        }
-                        .onAppear {
-                            currentColumnCount = columns
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    leftPanel
+                        .frame(width: mainGeometry.size.width * 0.1)
+                    rightPanel
                 }
                 
                 if let url = fullScreenImageURL {
@@ -249,38 +299,60 @@ struct ContentView: View {
                     })
                 }
                 
-                // Global Shortcuts
-                Button(action: { navigateUp() }) { Text("") }
-                    .keyboardShortcut(.upArrow, modifiers: [.command])
-                    .opacity(0)
-                    
-                Button(action: { handleUpArrow() }) { Text("") }
-                    .keyboardShortcut(.upArrow, modifiers: [])
-                    .opacity(0)
-                    
-                Button(action: { handleDownArrow() }) { Text("") }
-                    .keyboardShortcut(.downArrow, modifiers: [])
-                    .opacity(0)
-                    
-                Button(action: { handleLeftArrow() }) { Text("") }
-                    .keyboardShortcut(.leftArrow, modifiers: [])
-                    .opacity(0)
-                    
-                Button(action: { handleRightArrow() }) { Text("") }
-                    .keyboardShortcut(.rightArrow, modifiers: [])
-                    .opacity(0)
-                    
-                Button(action: { handleEnter() }) { Text("") }
-                    .keyboardShortcut(.space, modifiers: [])
-                    .opacity(0)
-                    
-                Button(action: { handleEnter() }) { Text("") }
-                    .keyboardShortcut(.downArrow, modifiers: [.command])
-                    .opacity(0)
+                shortcutsGroup
+            }
+            .safeAreaInset(edge: .bottom) {
+                statusBar
             }
             .frame(width: mainGeometry.size.width, height: mainGeometry.size.height)
         }
         .preferredColorScheme(.dark)
+        .onChange(of: selectedItemURL) { newURL in
+            updateMetadata(for: newURL)
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
+                    isShowingFolderPicker = true
+                }) {
+                    Label("Select Folder", systemImage: "folder.badge.plus")
+                }
+            }
+        }
+    }
+    
+    private func updateMetadata(for url: URL?) {
+        guard let url = url else {
+            metadataString = ""
+            return
+        }
+        
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+            metadataString = "Folder: \(url.lastPathComponent)"
+            return
+        }
+        
+        let name = url.lastPathComponent
+        var sizeStr = "Unknown Size"
+        if let attr = try? FileManager.default.attributesOfItem(atPath: url.path), let size = attr[.size] as? Int64 {
+            let formatter = ByteCountFormatter()
+            formatter.allowedUnits = [.useMB, .useKB, .useBytes]
+            formatter.countStyle = .file
+            sizeStr = formatter.string(fromByteCount: size)
+        }
+        
+        var dimensionsStr = ""
+        if let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any] {
+            let width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
+            let height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
+            if width > 0 && height > 0 {
+                dimensionsStr = " - \(width) x \(height)"
+            }
+        }
+        
+        metadataString = "\(name)  |  \(sizeStr)\(dimensionsStr)"
     }
     
     private func handleUpArrow() {
