@@ -180,9 +180,10 @@ struct ContentView: View {
     private var rightPanel: some View {
         GeometryReader { geometry in
             let columns = max(1, Int(geometry.size.width / 116))
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 16) {
-                    ForEach(folderContents) { item in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 100)), count: columns), spacing: 16) {
+                        ForEach(folderContents) { item in
                         VStack {
                             if item.isDirectory {
                                 Image(systemName: "folder.fill")
@@ -219,9 +220,15 @@ struct ContentView: View {
                         .onTapGesture(count: 1) {
                             selectedItemURL = item.url
                         }
+                        .id(item.url)
                     }
                 }
                 .padding()
+            }
+            .onChange(of: selectedItemURL) { newURL in
+                if let url = newURL {
+                    proxy.scrollTo(url)
+                }
             }
             .onChange(of: columns) { newValue in
                 currentColumnCount = newValue
@@ -229,7 +236,8 @@ struct ContentView: View {
             .onAppear {
                 currentColumnCount = columns
             }
-        }
+        } // closes ScrollViewReader
+        } // closes GeometryReader
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
     }
