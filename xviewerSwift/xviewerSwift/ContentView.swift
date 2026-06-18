@@ -335,7 +335,7 @@ struct FullScreenImageView: View {
         }
         .zIndex(1)
         .onAppear { loadImage(from: url) }
-        .onChange(of: url) { newURL in
+        .onChange(of: url) { oldURL, newURL in
             nsImage = nil
             zoomState.reset()
             loadImage(from: newURL)
@@ -594,16 +594,16 @@ struct ContentView: View {
                             dragCurrent = nil
                         }
                 )
-                .onChange(of: activeItemURL) { newURL in
+                .onChange(of: activeItemURL) { oldURL, newURL in
                     if let url = newURL {
                         proxy.scrollTo(url)
                     }
                 }
             }
-            .onChange(of: columns) { newValue in
+            .onChange(of: columns) { oldValue, newValue in
                 currentColumnCount = newValue
             }
-            .onChange(of: currentSortOrder) { _ in
+            .onChange(of: currentSortOrder) { oldOrder, newOrder in
                 folderContents = sortItems(folderContents)
             }
             .onAppear {
@@ -733,7 +733,7 @@ struct ContentView: View {
             .frame(width: mainGeometry.size.width, height: mainGeometry.size.height)
         }
         .preferredColorScheme(.dark)
-        .onChange(of: fullScreenImageURL) { newURL in
+        .onChange(of: fullScreenImageURL) { oldURL, newURL in
             if let url = newURL {
                 ImmersiveWindowController.shared.show {
                     FullScreenImageView(url: url, onClose: {
@@ -746,7 +746,7 @@ struct ContentView: View {
                 ImmersiveWindowController.shared.hide()
             }
         }
-        .onChange(of: activeItemURL) { newURL in
+        .onChange(of: activeItemURL) { oldURL, newURL in
             updateMetadata(for: newURL)
         }
         .toolbar {
