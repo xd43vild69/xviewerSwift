@@ -359,6 +359,7 @@ struct GridItemCell: View {
     @Binding var fullScreenImageURL: URL?
     @Binding var currentSortOrder: SortOrder
     let loadFolderAction: (URL) -> Void
+    let moveItemAction: (URL) -> Void
     
     var body: some View {
         VStack {
@@ -406,6 +407,10 @@ struct GridItemCell: View {
             }
             Button { currentSortOrder = .size } label: {
                 Label("Order by size", systemImage: currentSortOrder == .size ? "checkmark" : "")
+            }
+            Divider()
+            Button { moveItemAction(item.url) } label: {
+                Label("Move To...", systemImage: "folder")
             }
         }
     }
@@ -472,6 +477,9 @@ struct ContentView: View {
                                 currentSortOrder: $currentSortOrder,
                                 loadFolderAction: { url in
                                     loadFolder(url: url)
+                                },
+                                moveItemAction: { url in
+                                    moveItem(url)
                                 }
                             )
                             .id(item.url)
@@ -709,6 +717,44 @@ struct ContentView: View {
         } catch {
             print("Error deleting file: \(error)")
             NSSound.beep()
+        }
+    }
+    
+    private func moveItem(_ url: URL) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Move"
+        panel.message = "Choose destination folder"
+        
+        if panel.runModal() == .OK, let destinationURL = panel.url {
+            let finalURL = destinationURL.appendingPathComponent(url.lastPathComponent)
+            do {
+                try FileManager.default.moveItem(at: url, to: finalURL)
+                
+                let allItems = folderContents.filter { !$0.isDirectory }
+                guard let currentIndex = allItems.firstIndex(where: { $0.url == url }) else { return }
+                
+                let nextURL: URL?
+                if currentIndex + 1 < allItems.count {
+                    nextURL = allItems[currentIndex + 1].url
+                } else if currentIndex - 1 >= 0 {
+                    nextURL = allItems[currentIndex - 1].url
+                } else {
+                    nextURL = nil
+                }
+                
+                folderContents.removeAll(where: { $0.url == url })
+                
+                selectedItemURL = nextURL
+                if fullScreenImageURL != nil {
+                    fullScreenImageURL = nextURL
+                }
+            } catch {
+                print("Error moving file: \(error)")
+                NSSound.beep()
+            }
         }
     }
     
