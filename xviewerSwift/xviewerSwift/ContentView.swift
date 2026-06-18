@@ -478,8 +478,8 @@ struct GridItemCell: View {
 struct ContentView: View {
     @StateObject private var sidebarManager = SidebarManager()
     @State private var isShowingFolderPicker = false
+    @State private var sidebarSelection: URL?
     @State private var currentFolderURL: URL?
-    @State private var securityScopedURL: URL?
     @State private var folderContents: [FileItem] = []
     @State private var fullScreenImageURL: URL?
     @State private var selectedItemURLs: Set<URL> = []
@@ -508,7 +508,7 @@ struct ContentView: View {
     }
 
     private var leftPanel: some View {
-        SidebarNavigationView(manager: sidebarManager, selectedFolderURL: $currentFolderURL)
+        SidebarNavigationView(manager: sidebarManager, selectedFolderURL: $sidebarSelection)
             .fileImporter(
                 isPresented: $isShowingFolderPicker,
                 allowedContentTypes: [.folder],
@@ -516,14 +516,10 @@ struct ContentView: View {
             ) { result in
                 switch result {
                 case .success(let urls):
-                    if let url = urls.first {
-                        securityScopedURL?.stopAccessingSecurityScopedResource()
-                        if url.startAccessingSecurityScopedResource() {
-                            securityScopedURL = url
-                        }
-                        saveBookmark(for: url)
-                        // Trigger reload implicitly by updating currentFolderURL
-                        currentFolderURL = url
+                    if let rawURL = urls.first {
+                        let secureURL = sidebarManager.makeSecureURL(rawURL)
+                        sidebarSelection = secureURL
+                        saveBookmark(for: secureURL)
                     }
                 case .failure(let error):
                     print("Error selecting folder: \(error.localizedDescription)")
@@ -583,6 +579,7 @@ struct ContentView: View {
                                 fullScreenImageURL: $fullScreenImageURL,
                                 currentSortOrder: $currentSortOrder,
                                 loadFolderAction: { url in
+                                    sidebarSelection = nil
                                     loadFolder(url: url)
                                 },
                                 moveItemAction: { url in
@@ -650,12 +647,11 @@ struct ContentView: View {
             }
             .onAppear {
                 currentColumnCount = columns
-                if let url = restoreBookmark(), url.startAccessingSecurityScopedResource() {
-                    securityScopedURL = url
-                    currentFolderURL = url
+                if let url = restoreBookmark() {
+                    sidebarSelection = url
                 } else {
                     let home = FileManager.default.homeDirectoryForCurrentUser
-                    currentFolderURL = home
+                    sidebarSelection = home
                 }
             }
         }
@@ -815,6 +811,11 @@ struct ContentView: View {
             .frame(width: mainGeometry.size.width, height: mainGeometry.size.height)
         }
         .preferredColorScheme(.dark)
+        .onChange(of: sidebarSelection) { oldURL, newURL in
+            if let url = newURL {
+                loadFolder(url: url)
+            }
+        }
         .onChange(of: fullScreenImageURL) { oldURL, newURL in
             if let url = newURL {
                 ImmersiveWindowController.shared.show {
@@ -830,15 +831,6 @@ struct ContentView: View {
         }
         .onChange(of: activeItemURL) { oldURL, newURL in
             updateMetadata(for: newURL)
-        }
-        .onChange(of: currentFolderURL) { oldURL, newURL in
-            if let url = newURL {
-                securityScopedURL?.stopAccessingSecurityScopedResource()
-                if url.startAccessingSecurityScopedResource() {
-                    securityScopedURL = url
-                }
-                loadFolder(url: url)
-            }
         }
         .sheet(isPresented: $isShowingProperties) {
             if let url = propertiesURL {
@@ -1064,7 +1056,6 @@ struct ContentView: View {
             targets.insert(url)
         }
         
-        let accessed = securityScopedURL?.startAccessingSecurityScopedResource() ?? false
         for target in targets {
             _ = target.startAccessingSecurityScopedResource()
         }
@@ -1150,8 +1141,6 @@ struct ContentView: View {
         let parentFolder = currentFolderURL
         
         await Task.detached(priority: .userInitiated) {
-            let folderAccessed = parentFolder?.startAccessingSecurityScopedResource() ?? false
-            
             for (source, destination) in moves {
                 let itemAccessed = source.startAccessingSecurityScopedResource()
                 do {
@@ -1168,7 +1157,6 @@ struct ContentView: View {
                     source.stopAccessingSecurityScopedResource()
                 }
             }
-            // We do not stop accessing parentFolder since app needs it continuously.
         }.value
         
         if let url = currentFolderURL {
@@ -1255,6 +1243,7 @@ struct ContentView: View {
         
         if let item = folderContents.first(where: { $0.url == selected }) {
             if item.isDirectory {
+                sidebarSelection = nil
                 loadFolder(url: item.url)
             } else {
                 fullScreenImageURL = item.url
@@ -1263,12 +1252,11 @@ struct ContentView: View {
     }
     
     private func navigateUp() {
-        guard let current = currentFolderURL, let root = securityScopedURL else { return }
+        guard let current = currentFolderURL else { return }
+        let parentURL = current.deletingLastPathComponent()
         
-        if current.standardizedFileURL.path != root.standardizedFileURL.path {
-            let parentURL = current.deletingLastPathComponent()
-            loadFolder(url: parentURL)
-        }
+        sidebarSelection = nil
+        loadFolder(url: parentURL)
     }
     
     private func sortItems(_ items: [FileItem]) -> [FileItem] {

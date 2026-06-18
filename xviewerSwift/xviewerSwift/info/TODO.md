@@ -1,8 +1,8 @@
 🔴 
 
-- contextmenu nueva opcion properties, cuando se selecciona abre una ventana con el metadato de la imagen, importante leer la informacion generada por comfyui del prompt que construyo dicha imagen
 
-- 🟡 Icono de la aplicacion
+
+
 
 - 🟡 terminal integrated into the app, this is the most avance and sync feature
 
@@ -10,6 +10,7 @@
     click derecho debe mostrar opciones avanzadas como: ordenar - pegar - etc 
     piensa en 3ds max
 
+10. **Etiquetas o Clasificación:** Poder ponerles estrellas (del 1 al 5) o etiquetas de colores tipo Finder a las imágenes para organizarlas mejor.
 
 ---
 
@@ -36,5 +37,5 @@ Funciones de "nicho", muy potentes, pero que dependen del tipo de usuario al que
 
 8. **Panel de Información y EXIF:** Al presionar `Cmd + I` (o tener un panel lateral derecho), ver detalles avanzados de la fotografía: con qué cámara se tomó, el ISO, la apertura, dimensiones exactas y ubicación en el mapa.
 9. **Acciones en Lote (Bulk Actions):** Seleccionar 50 imágenes y poder cambiarles el tamaño a todas al mismo tiempo, convertirlas a `.jpg` o renombrarlas masivamente (ej. "Viaje_01", "Viaje_02"...).
-10. **Etiquetas o Clasificación:** Poder ponerles estrellas (del 1 al 5) o etiquetas de colores tipo Finder a las imágenes para organizarlas mejor.
+
 

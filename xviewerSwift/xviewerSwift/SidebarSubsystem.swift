@@ -15,6 +15,7 @@ struct SidebarFolderItem: Identifiable, Hashable {
     let name: String
     let systemIcon: String
     var visitCount: Int = 1
+    var bookmarkData: Data? = nil
 }
 
 struct PersistedSidebarItem: Codable {
@@ -59,29 +60,57 @@ class SidebarManager: ObservableObject {
         if let index = recent.firstIndex(where: { $0.url == url }) {
             recent[index].visitCount += 1
         } else {
-            let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "clock", visitCount: 1)
+            let bData = createBookmark(for: url)
+            let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "clock", visitCount: 1, bookmarkData: bData)
             recent.append(newItem)
         }
         
         // Ordenamiento descendente por peso de frecuencia (Frequency Metric)
         recent.sort { $0.visitCount > $1.visitCount }
         
-        if recent.count > 7 {
-            recent.removeLast()
+        while recent.count > 7 {
+            let removed = recent.removeLast()
+            removed.url.stopAccessingSecurityScopedResource()
         }
         saveState()
     }
     
     func pinFolder(url: URL) {
         guard !bookmarks.contains(where: { $0.url == url }) else { return }
-        let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "bookmark.fill")
+        let bData = createBookmark(for: url)
+        let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "bookmark.fill", visitCount: 1, bookmarkData: bData)
         bookmarks.append(newItem)
         saveState()
     }
     
     func unpinFolder(url: URL) {
+        url.stopAccessingSecurityScopedResource()
         bookmarks.removeAll { $0.url == url }
         saveState()
+    }
+    
+    private func createBookmark(for url: URL) -> Data? {
+        do {
+            let isAccessed = url.startAccessingSecurityScopedResource()
+            defer { if isAccessed { url.stopAccessingSecurityScopedResource() } }
+            return try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        } catch {
+            do {
+                return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+            } catch {
+                return nil
+            }
+        }
+    }
+    
+    func makeSecureURL(_ url: URL) -> URL {
+        guard let bData = createBookmark(for: url) else { return url }
+        var isStale = false
+        if let secureURL = try? URL(resolvingBookmarkData: bData, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale) {
+            _ = secureURL.startAccessingSecurityScopedResource()
+            return secureURL
+        }
+        return url
     }
 
     // MARK: - Persistence
@@ -98,18 +127,8 @@ class SidebarManager: ObservableObject {
     
     private func saveItems(_ items: [SidebarFolderItem], forKey key: String) {
         let persistedItems = items.compactMap { item -> PersistedSidebarItem? in
-            var bookmarkData: Data
-            do {
-                bookmarkData = try item.url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-            } catch {
-                do {
-                    bookmarkData = try item.url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-                } catch {
-                    print("Failed to create bookmark for \(item.url): \(error)")
-                    return nil
-                }
-            }
-            return PersistedSidebarItem(name: item.name, systemIcon: item.systemIcon, visitCount: item.visitCount, bookmarkData: bookmarkData)
+            guard let data = item.bookmarkData ?? createBookmark(for: item.url) else { return nil }
+            return PersistedSidebarItem(name: item.name, systemIcon: item.systemIcon, visitCount: item.visitCount, bookmarkData: data)
         }
         if let encoded = try? JSONEncoder().encode(persistedItems) {
             UserDefaults.standard.set(encoded, forKey: key)
@@ -136,7 +155,8 @@ class SidebarManager: ObservableObject {
                 }
             }
             if let validURL = url {
-                let item = SidebarFolderItem(url: validURL, name: pItem.name, systemIcon: pItem.systemIcon, visitCount: pItem.visitCount)
+                _ = validURL.startAccessingSecurityScopedResource()
+                let item = SidebarFolderItem(url: validURL, name: pItem.name, systemIcon: pItem.systemIcon, visitCount: pItem.visitCount, bookmarkData: pItem.bookmarkData)
                 loadedItems.append(item)
             }
         }
