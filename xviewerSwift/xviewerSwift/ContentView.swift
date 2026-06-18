@@ -52,6 +52,10 @@ struct ContentView: View {
                     switch result {
                     case .success(let urls):
                         if let url = urls.first {
+                            securityScopedURL?.stopAccessingSecurityScopedResource()
+                            if url.startAccessingSecurityScopedResource() {
+                                securityScopedURL = url
+                            }
                             loadFolder(url: url)
                         }
                     case .failure(let error):
@@ -149,6 +153,10 @@ struct ContentView: View {
                 }
                 .zIndex(1)
             }
+            
+            // Global Shortcuts
+            Button(action: { navigateUp() }) { Text("").hidden() }
+                .keyboardShortcut(.upArrow, modifiers: [.command])
         }
     }
     
@@ -163,17 +171,17 @@ struct ContentView: View {
         }
     }
     
-    private func loadFolder(url: URL) {
-        // Clean up previous access if any
-        securityScopedURL?.stopAccessingSecurityScopedResource()
+    private func navigateUp() {
+        guard let current = currentFolderURL, let root = securityScopedURL else { return }
         
-        let hasAccess = url.startAccessingSecurityScopedResource()
-        if hasAccess {
-            securityScopedURL = url
-        } else {
-            print("Failed to access security scoped resource or didn't need it.")
+        // Prevent navigating above the originally selected folder
+        if current.standardizedFileURL.path != root.standardizedFileURL.path {
+            let parentURL = current.deletingLastPathComponent()
+            loadFolder(url: parentURL)
         }
-        
+    }
+    
+    private func loadFolder(url: URL) {
         currentFolderURL = url
         
         do {
