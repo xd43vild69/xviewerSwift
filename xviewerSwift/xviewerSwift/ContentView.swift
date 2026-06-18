@@ -371,8 +371,10 @@ struct GridItemCell: View {
     let createNewFolderAction: () -> Void
     let openWithKritaAction: (URL) -> Void
     let renameItemAction: (URL) -> Void
+    let showPropertiesAction: (URL) -> Void
     let isBookmarked: Bool
     let toggleBookmarkAction: () -> Void
+    let isSingleSelection: Bool
     
     var body: some View {
         VStack {
@@ -462,6 +464,13 @@ struct GridItemCell: View {
             Button { renameItemAction(item.url) } label: {
                 Label("Rename...", systemImage: "pencil.line")
             }
+            if !item.isDirectory {
+                Divider()
+                Button { showPropertiesAction(item.url) } label: {
+                    Label("Properties", systemImage: "info.circle")
+                }
+                .disabled(!isSingleSelection)
+            }
         }
     }
 }
@@ -482,6 +491,9 @@ struct ContentView: View {
     @State private var currentColumnCount: Int = 1
     @State private var metadataString: String = ""
     @State private var currentSortOrder: SortOrder = .name
+    
+    @State private var isShowingProperties = false
+    @State private var propertiesURL: URL?
     
     @State private var isShowingSingleRenameAlert = false
     @State private var singleRenameBaseName: String = ""
@@ -585,6 +597,10 @@ struct ContentView: View {
                                 renameItemAction: { url in
                                     promptSingleRename(for: url)
                                 },
+                                showPropertiesAction: { url in
+                                    propertiesURL = url
+                                    isShowingProperties = true
+                                },
                                 isBookmarked: sidebarManager.bookmarks.contains(where: { $0.url == item.url }),
                                 toggleBookmarkAction: {
                                     if sidebarManager.bookmarks.contains(where: { $0.url == item.url }) {
@@ -592,7 +608,8 @@ struct ContentView: View {
                                     } else {
                                         sidebarManager.pinFolder(url: item.url)
                                     }
-                                }
+                                },
+                                isSingleSelection: selectedItemURLs.count == 1 && selectedItemURLs.contains(item.url)
                             )
                             .id(item.url)
                         }
@@ -821,6 +838,11 @@ struct ContentView: View {
                     securityScopedURL = url
                 }
                 loadFolder(url: url)
+            }
+        }
+        .sheet(isPresented: $isShowingProperties) {
+            if let url = propertiesURL {
+                PropertiesView(url: url)
             }
         }
         .toolbar {
