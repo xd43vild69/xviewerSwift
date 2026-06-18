@@ -17,6 +17,13 @@ struct SidebarFolderItem: Identifiable, Hashable {
     var visitCount: Int = 1
 }
 
+struct PersistedSidebarItem: Codable {
+    let name: String
+    let systemIcon: String
+    let visitCount: Int
+    let bookmarkData: Data
+}
+
 // MARK: - 2. GESTOR DE ESTADO DESACOPLADO (SidebarManager)
 
 @MainActor
@@ -25,8 +32,12 @@ class SidebarManager: ObservableObject {
     @Published var bookmarks: [SidebarFolderItem] = []
     @Published var recent: [SidebarFolderItem] = []
     
+    private let bookmarksKey = "sidebar_bookmarks_v1"
+    private let recentKey = "sidebar_recent_v1"
+
     init() {
         loadDefaultSources()
+        loadState()
     }
     
     private func loadDefaultSources() {
@@ -58,23 +69,85 @@ class SidebarManager: ObservableObject {
         if recent.count > 7 {
             recent.removeLast()
         }
+        saveState()
     }
     
     func pinFolder(url: URL) {
         guard !bookmarks.contains(where: { $0.url == url }) else { return }
         let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "bookmark.fill")
         bookmarks.append(newItem)
+        saveState()
     }
     
     func unpinFolder(url: URL) {
         bookmarks.removeAll { $0.url == url }
+        saveState()
+    }
+
+    // MARK: - Persistence
+    
+    private func saveState() {
+        saveItems(bookmarks, forKey: bookmarksKey)
+        saveItems(recent, forKey: recentKey)
+    }
+    
+    private func loadState() {
+        bookmarks = loadItems(forKey: bookmarksKey)
+        recent = loadItems(forKey: recentKey)
+    }
+    
+    private func saveItems(_ items: [SidebarFolderItem], forKey key: String) {
+        let persistedItems = items.compactMap { item -> PersistedSidebarItem? in
+            var bookmarkData: Data
+            do {
+                bookmarkData = try item.url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+            } catch {
+                do {
+                    bookmarkData = try item.url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+                } catch {
+                    print("Failed to create bookmark for \(item.url): \(error)")
+                    return nil
+                }
+            }
+            return PersistedSidebarItem(name: item.name, systemIcon: item.systemIcon, visitCount: item.visitCount, bookmarkData: bookmarkData)
+        }
+        if let encoded = try? JSONEncoder().encode(persistedItems) {
+            UserDefaults.standard.set(encoded, forKey: key)
+        }
+    }
+    
+    private func loadItems(forKey key: String) -> [SidebarFolderItem] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let persistedItems = try? JSONDecoder().decode([PersistedSidebarItem].self, from: data) else {
+            return []
+        }
+        
+        var loadedItems: [SidebarFolderItem] = []
+        for pItem in persistedItems {
+            var isStale = false
+            var url: URL?
+            do {
+                url = try URL(resolvingBookmarkData: pItem.bookmarkData, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale)
+            } catch {
+                do {
+                    url = try URL(resolvingBookmarkData: pItem.bookmarkData, options: [], relativeTo: nil, bookmarkDataIsStale: &isStale)
+                } catch {
+                    print("Failed to resolve bookmark: \(error)")
+                }
+            }
+            if let validURL = url {
+                let item = SidebarFolderItem(url: validURL, name: pItem.name, systemIcon: pItem.systemIcon, visitCount: pItem.visitCount)
+                loadedItems.append(item)
+            }
+        }
+        return loadedItems
     }
 }
 
 // MARK: - 3. COMPONENTE DE INTERFAZ DE USUARIO (SidebarNavigationView)
 
 struct SidebarNavigationView: View {
-    @StateObject private var manager = SidebarManager()
+    @ObservedObject var manager: SidebarManager
     @Binding var selectedFolderURL: URL?
     
     var body: some View {

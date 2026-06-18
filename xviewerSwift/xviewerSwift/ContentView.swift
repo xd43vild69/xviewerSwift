@@ -371,6 +371,8 @@ struct GridItemCell: View {
     let createNewFolderAction: () -> Void
     let openWithKritaAction: (URL) -> Void
     let renameItemAction: (URL) -> Void
+    let isBookmarked: Bool
+    let toggleBookmarkAction: () -> Void
     
     var body: some View {
         VStack {
@@ -444,6 +446,12 @@ struct GridItemCell: View {
             Button { createNewFolderAction() } label: {
                 Label("New Folder", systemImage: "folder.badge.plus")
             }
+            if item.isDirectory {
+                Divider()
+                Button { toggleBookmarkAction() } label: {
+                    Label(isBookmarked ? "Remove from Bookmarks" : "Add to Bookmarks", systemImage: isBookmarked ? "bookmark.slash" : "bookmark")
+                }
+            }
             if !item.isDirectory {
                 Divider()
                 Button { openWithKritaAction(item.url) } label: {
@@ -459,6 +467,7 @@ struct GridItemCell: View {
 }
 
 struct ContentView: View {
+    @StateObject private var sidebarManager = SidebarManager()
     @State private var isShowingFolderPicker = false
     @State private var currentFolderURL: URL?
     @State private var securityScopedURL: URL?
@@ -486,7 +495,7 @@ struct ContentView: View {
     }
 
     private var leftPanel: some View {
-        SidebarNavigationView(selectedFolderURL: $currentFolderURL)
+        SidebarNavigationView(manager: sidebarManager, selectedFolderURL: $currentFolderURL)
             .fileImporter(
                 isPresented: $isShowingFolderPicker,
                 allowedContentTypes: [.folder],
@@ -574,6 +583,14 @@ struct ContentView: View {
                                 },
                                 renameItemAction: { url in
                                     promptSingleRename(for: url)
+                                },
+                                isBookmarked: sidebarManager.bookmarks.contains(where: { $0.url == item.url }),
+                                toggleBookmarkAction: {
+                                    if sidebarManager.bookmarks.contains(where: { $0.url == item.url }) {
+                                        sidebarManager.unpinFolder(url: item.url)
+                                    } else {
+                                        sidebarManager.pinFolder(url: item.url)
+                                    }
                                 }
                             )
                             .id(item.url)
@@ -761,6 +778,10 @@ struct ContentView: View {
         }
         .onChange(of: currentFolderURL) { oldURL, newURL in
             if let url = newURL {
+                securityScopedURL?.stopAccessingSecurityScopedResource()
+                if url.startAccessingSecurityScopedResource() {
+                    securityScopedURL = url
+                }
                 loadFolder(url: url)
             }
         }

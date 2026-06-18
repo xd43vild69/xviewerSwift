@@ -1,9 +1,4 @@
-
-- 🔴 a la izquierda se podran anclar carpetas de navegacion clave en especial debe aparecer una seccion donde estan las 7 ultimas carpetas mas usadas
-
-- 🔴 rename files on folder
-
-- en status bar necesito mostrar ruta completa de archivo y su nombre
+- 🔴 en status bar necesito mostrar ruta completa de archivo y su nombre
     El nombre debe permitirse ser copiado
 
 - 🟡 Icono de la aplicacion
