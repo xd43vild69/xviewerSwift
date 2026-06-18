@@ -15,9 +15,47 @@ struct FileItem: Identifiable, Hashable {
     let isDirectory: Bool
 }
 
+class ThumbnailLoader {
+    static let shared = ThumbnailLoader()
+    private var activeTasks = 0
+    private let maxTasks = 4
+    private var pendingContinuations: [CheckedContinuation<Void, Never>] = []
+    private let lock = NSLock()
+    
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if activeTasks < maxTasks {
+                activeTasks += 1
+                lock.unlock()
+                continuation.resume()
+            } else {
+                pendingContinuations.append(continuation)
+                lock.unlock()
+            }
+        }
+    }
+    
+    func signal() {
+        lock.lock()
+        if !pendingContinuations.isEmpty {
+            let continuation = pendingContinuations.removeFirst()
+            lock.unlock()
+            continuation.resume()
+        } else {
+            activeTasks -= 1
+            lock.unlock()
+        }
+    }
+}
+
 class ThumbnailCache {
     static let shared = ThumbnailCache()
     private let cache = NSCache<NSURL, NSImage>()
+    
+    private init() {
+        cache.countLimit = 1000 // ~100 MB max for 160x160 thumbnails
+    }
     
     func get(for url: URL) -> NSImage? {
         return cache.object(forKey: url as NSURL)
@@ -45,14 +83,26 @@ struct FileItemView: View {
                 Color.gray.opacity(0.3)
                     .frame(width: 80, height: 80)
                     .cornerRadius(8)
-                    .onAppear {
-                        loadThumbnail()
+                    .task(id: url) {
+                        await loadThumbnail()
                     }
             }
         }
     }
     
-    private func loadThumbnail() {
+    private func loadThumbnail() async {
+        if let cached = ThumbnailCache.shared.get(for: url) {
+            self.thumbnail = cached
+            return
+        }
+        
+        await ThumbnailLoader.shared.wait()
+        defer {
+            ThumbnailLoader.shared.signal()
+        }
+        
+        if Task.isCancelled { return }
+        
         if let cached = ThumbnailCache.shared.get(for: url) {
             self.thumbnail = cached
             return
@@ -66,21 +116,28 @@ struct FileItemView: View {
             representationTypes: .thumbnail
         )
         
-        QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { representation, error in
-            if let nsImage = representation?.nsImage {
-                ThumbnailCache.shared.set(nsImage, for: self.url)
-                DispatchQueue.main.async {
-                    self.thumbnail = nsImage
+        do {
+            let representation = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
+            let nsImage = representation.nsImage
+            ThumbnailCache.shared.set(nsImage, for: self.url)
+            self.thumbnail = nsImage
+        } catch {
+            let img = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+                let options: [CFString: Any] = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 160
+                ]
+                if let imageSource = CGImageSourceCreateWithURL(self.url as CFURL, nil),
+                   let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
+                    return NSImage(cgImage: cgImage, size: .zero)
                 }
-            } else {
-                DispatchQueue.global(qos: .background).async {
-                    if let img = NSImage(contentsOf: self.url) {
-                        ThumbnailCache.shared.set(img, for: self.url)
-                        DispatchQueue.main.async {
-                            self.thumbnail = img
-                        }
-                    }
-                }
+                return nil
+            }.value
+            
+            if let img = img {
+                ThumbnailCache.shared.set(img, for: self.url)
+                self.thumbnail = img
             }
         }
     }
@@ -474,38 +531,74 @@ struct ContentView: View {
     
     private func loadFolder(url: URL) {
         currentFolderURL = url
+        folderContents = []
+        selectedItemURL = nil
         
-        do {
-            let fileURLs = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: .skipsHiddenFiles)
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else {
+                return
+            }
             
-            var items: [FileItem] = []
-            for fileURL in fileURLs {
-                let resourceValues = try fileURL.resourceValues(forKeys: [.isDirectoryKey])
-                let isDirectory = resourceValues.isDirectory ?? false
+            var batch: [FileItem] = []
+            var allItems: [FileItem] = []
+            
+            for case let fileURL as URL in enumerator {
+                let isDirectory: Bool
+                if let resourceValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey]),
+                   let isDir = resourceValues.isDirectory {
+                    isDirectory = isDir
+                } else {
+                    isDirectory = false
+                }
                 
                 if !isDirectory {
                     let ext = fileURL.pathExtension.lowercased()
                     let imageExtensions = ["jpg", "jpeg", "png", "gif", "heic", "webp"]
                     if imageExtensions.contains(ext) {
-                        items.append(FileItem(url: fileURL, isDirectory: false))
+                        batch.append(FileItem(url: fileURL, isDirectory: false))
                     }
                 } else {
-                    items.append(FileItem(url: fileURL, isDirectory: true))
+                    batch.append(FileItem(url: fileURL, isDirectory: true))
+                }
+                
+                if batch.count >= 100 {
+                    allItems.append(contentsOf: batch)
+                    batch.removeAll(keepingCapacity: true)
+                    
+                    var sortedItems = allItems
+                    sortedItems.sort {
+                        if $0.isDirectory && !$1.isDirectory { return true }
+                        if !$0.isDirectory && $1.isDirectory { return false }
+                        return $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending
+                    }
+                    
+                    DispatchQueue.main.async {
+                        guard self.currentFolderURL == url else { return }
+                        self.folderContents = sortedItems
+                        if self.selectedItemURL == nil {
+                            self.selectedItemURL = sortedItems.first?.url
+                        }
+                    }
                 }
             }
             
-            items.sort {
-                if $0.isDirectory && !$1.isDirectory { return true }
-                if !$0.isDirectory && $1.isDirectory { return false }
-                return $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending
+            if !batch.isEmpty || allItems.isEmpty {
+                allItems.append(contentsOf: batch)
+                var sortedItems = allItems
+                sortedItems.sort {
+                    if $0.isDirectory && !$1.isDirectory { return true }
+                    if !$0.isDirectory && $1.isDirectory { return false }
+                    return $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending
+                }
+                
+                DispatchQueue.main.async {
+                    guard self.currentFolderURL == url else { return }
+                    self.folderContents = sortedItems
+                    if self.selectedItemURL == nil {
+                        self.selectedItemURL = sortedItems.first?.url
+                    }
+                }
             }
-            
-            DispatchQueue.main.async {
-                self.folderContents = items
-                self.selectedItemURL = items.first?.url
-            }
-        } catch {
-            print("Error loading directory: \(error.localizedDescription)")
         }
     }
 }
