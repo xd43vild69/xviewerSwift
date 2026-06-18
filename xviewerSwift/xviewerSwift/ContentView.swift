@@ -9,10 +9,18 @@ import SwiftUI
 import UniformTypeIdentifiers
 import QuickLookThumbnailing
 
+enum SortOrder: String, CaseIterable {
+    case name
+    case date
+    case size
+}
+
 struct FileItem: Identifiable, Hashable {
     let id = UUID()
     let url: URL
     let isDirectory: Bool
+    let creationDate: Date
+    let fileSize: Int64
 }
 
 class ThumbnailLoader {
@@ -327,6 +335,64 @@ struct FullScreenImageView: View {
     }
 }
 
+struct GridItemCell: View {
+    let item: FileItem
+    @Binding var selectedItemURL: URL?
+    @Binding var fullScreenImageURL: URL?
+    @Binding var currentSortOrder: SortOrder
+    let loadFolderAction: (URL) -> Void
+    
+    var body: some View {
+        VStack {
+            if item.isDirectory {
+                Image(systemName: "folder.fill")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 50, height: 50)
+                    .foregroundColor(.blue)
+            } else {
+                FileItemView(url: item.url)
+            }
+            Text(item.url.lastPathComponent)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(selectedItemURL == item.url ? Color.blue.opacity(0.2) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(selectedItemURL == item.url ? Color.blue : Color.clear, lineWidth: 2)
+        )
+        .help(item.url.lastPathComponent)
+        .onTapGesture(count: 2) {
+            selectedItemURL = item.url
+            if item.isDirectory {
+                loadFolderAction(item.url)
+            } else {
+                fullScreenImageURL = item.url
+            }
+        }
+        .onTapGesture(count: 1) {
+            selectedItemURL = item.url
+        }
+        .contextMenu {
+            Button { currentSortOrder = .name } label: {
+                Label("Order by name", systemImage: currentSortOrder == .name ? "checkmark" : "")
+            }
+            Button { currentSortOrder = .date } label: {
+                Label("Order by date", systemImage: currentSortOrder == .date ? "checkmark" : "")
+            }
+            Button { currentSortOrder = .size } label: {
+                Label("Order by size", systemImage: currentSortOrder == .size ? "checkmark" : "")
+            }
+        }
+    }
+}
+
 struct ContentView: View {
     @State private var isShowingFolderPicker = false
     @State private var currentFolderURL: URL?
@@ -336,6 +402,7 @@ struct ContentView: View {
     @State private var selectedItemURL: URL?
     @State private var currentColumnCount: Int = 1
     @State private var metadataString: String = ""
+    @State private var currentSortOrder: SortOrder = .name
 
     private var imageItems: [FileItem] {
         folderContents.filter { !$0.isDirectory }
@@ -380,45 +447,18 @@ struct ContentView: View {
                 ScrollView {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 100)), count: columns), spacing: 16) {
                         ForEach(folderContents) { item in
-                        VStack {
-                            if item.isDirectory {
-                                Image(systemName: "folder.fill")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 50, height: 50)
-                                    .foregroundColor(.blue)
-                            } else {
-                                FileItemView(url: item.url)
-                            }
-                            Text(item.url.lastPathComponent)
-                                .font(.caption)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                            GridItemCell(
+                                item: item,
+                                selectedItemURL: $selectedItemURL,
+                                fullScreenImageURL: $fullScreenImageURL,
+                                currentSortOrder: $currentSortOrder,
+                                loadFolderAction: { url in
+                                    loadFolder(url: url)
+                                }
+                            )
+                            .id(item.url)
                         }
-                        .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(selectedItemURL == item.url ? Color.blue.opacity(0.2) : Color.clear)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(selectedItemURL == item.url ? Color.blue : Color.clear, lineWidth: 2)
-                        )
-                        .help(item.url.lastPathComponent)
-                        .onTapGesture(count: 2) {
-                            selectedItemURL = item.url
-                            if item.isDirectory {
-                                loadFolder(url: item.url)
-                            } else {
-                                fullScreenImageURL = item.url
-                            }
-                        }
-                        .onTapGesture(count: 1) {
-                            selectedItemURL = item.url
-                        }
-                        .id(item.url)
                     }
-                }
                 .padding()
             }
             .onChange(of: selectedItemURL) { newURL in
@@ -428,6 +468,9 @@ struct ContentView: View {
             }
             .onChange(of: columns) { newValue in
                 currentColumnCount = newValue
+            }
+            .onChange(of: currentSortOrder) { _ in
+                folderContents = sortItems(folderContents)
             }
             .onAppear {
                 currentColumnCount = columns
@@ -798,13 +841,29 @@ struct ContentView: View {
         }
     }
     
+    private func sortItems(_ items: [FileItem]) -> [FileItem] {
+        return items.sorted {
+            if $0.isDirectory && !$1.isDirectory { return true }
+            if !$0.isDirectory && $1.isDirectory { return false }
+            
+            switch currentSortOrder {
+            case .name:
+                return $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending
+            case .date:
+                return $0.creationDate > $1.creationDate
+            case .size:
+                return $0.fileSize > $1.fileSize
+            }
+        }
+    }
+    
     private func loadFolder(url: URL) {
         currentFolderURL = url
         folderContents = []
         selectedItemURL = nil
         
         DispatchQueue.global(qos: .userInitiated).async {
-            guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else {
+            guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else {
                 return
             }
             
@@ -812,34 +871,31 @@ struct ContentView: View {
             var allItems: [FileItem] = []
             
             for case let fileURL as URL in enumerator {
-                let isDirectory: Bool
-                if let resourceValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey]),
-                   let isDir = resourceValues.isDirectory {
-                    isDirectory = isDir
-                } else {
-                    isDirectory = false
+                var isDirectory = false
+                var fileDate = Date.distantPast
+                var fileSize: Int64 = 0
+                
+                if let resourceValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey]) {
+                    isDirectory = resourceValues.isDirectory ?? false
+                    fileDate = resourceValues.creationDate ?? Date.distantPast
+                    fileSize = Int64(resourceValues.fileSize ?? 0)
                 }
                 
                 if !isDirectory {
                     let ext = fileURL.pathExtension.lowercased()
                     let imageExtensions = ["jpg", "jpeg", "png", "gif", "heic", "webp"]
                     if imageExtensions.contains(ext) {
-                        batch.append(FileItem(url: fileURL, isDirectory: false))
+                        batch.append(FileItem(url: fileURL, isDirectory: false, creationDate: fileDate, fileSize: fileSize))
                     }
                 } else {
-                    batch.append(FileItem(url: fileURL, isDirectory: true))
+                    batch.append(FileItem(url: fileURL, isDirectory: true, creationDate: fileDate, fileSize: fileSize))
                 }
                 
                 if batch.count >= 100 {
                     allItems.append(contentsOf: batch)
                     batch.removeAll(keepingCapacity: true)
                     
-                    var sortedItems = allItems
-                    sortedItems.sort {
-                        if $0.isDirectory && !$1.isDirectory { return true }
-                        if !$0.isDirectory && $1.isDirectory { return false }
-                        return $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending
-                    }
+                    let sortedItems = self.sortItems(allItems)
                     
                     DispatchQueue.main.async {
                         guard self.currentFolderURL == url else { return }
@@ -853,12 +909,7 @@ struct ContentView: View {
             
             if !batch.isEmpty || allItems.isEmpty {
                 allItems.append(contentsOf: batch)
-                var sortedItems = allItems
-                sortedItems.sort {
-                    if $0.isDirectory && !$1.isDirectory { return true }
-                    if !$0.isDirectory && $1.isDirectory { return false }
-                    return $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending
-                }
+                let sortedItems = self.sortItems(allItems)
                 
                 DispatchQueue.main.async {
                     guard self.currentFolderURL == url else { return }
