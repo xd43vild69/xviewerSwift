@@ -1,4 +1,4 @@
-ordenamiento por fecha - size - etc
+
 
 size preview images
 
