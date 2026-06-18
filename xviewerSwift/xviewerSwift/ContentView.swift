@@ -15,6 +15,19 @@ struct FileItem: Identifiable, Hashable {
     let isDirectory: Bool
 }
 
+class ThumbnailCache {
+    static let shared = ThumbnailCache()
+    private let cache = NSCache<NSURL, NSImage>()
+    
+    func get(for url: URL) -> NSImage? {
+        return cache.object(forKey: url as NSURL)
+    }
+    
+    func set(_ image: NSImage, for url: URL) {
+        cache.setObject(image, forKey: url as NSURL)
+    }
+}
+
 struct FileItemView: View {
     let url: URL
     @State private var thumbnail: NSImage?
@@ -40,6 +53,11 @@ struct FileItemView: View {
     }
     
     private func loadThumbnail() {
+        if let cached = ThumbnailCache.shared.get(for: url) {
+            self.thumbnail = cached
+            return
+        }
+        
         let size = CGSize(width: 160, height: 160)
         let request = QLThumbnailGenerator.Request(
             fileAt: url,
@@ -50,12 +68,14 @@ struct FileItemView: View {
         
         QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { representation, error in
             if let nsImage = representation?.nsImage {
+                ThumbnailCache.shared.set(nsImage, for: self.url)
                 DispatchQueue.main.async {
                     self.thumbnail = nsImage
                 }
             } else {
                 DispatchQueue.global(qos: .background).async {
-                    if let img = NSImage(contentsOf: url) {
+                    if let img = NSImage(contentsOf: self.url) {
+                        ThumbnailCache.shared.set(img, for: self.url)
                         DispatchQueue.main.async {
                             self.thumbnail = img
                         }
