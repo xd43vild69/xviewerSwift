@@ -24,7 +24,7 @@ struct FileItemView: View {
             if let thumbnail = thumbnail {
                 Image(nsImage: thumbnail)
                     .resizable()
-                    .scaledToFill()
+                    .scaledToFit()
                     .frame(width: 80, height: 80)
                     .clipped()
                     .cornerRadius(8)
@@ -272,6 +272,10 @@ struct ContentView: View {
                     
                 Button(action: { handleEnter() }) { Text("") }
                     .keyboardShortcut(.space, modifiers: [])
+                    .opacity(0)
+                    
+                Button(action: { handleEnter() }) { Text("") }
+                    .keyboardShortcut(.downArrow, modifiers: [.command])
                     .opacity(0)
             }
             .frame(width: mainGeometry.size.width, height: mainGeometry.size.height)
