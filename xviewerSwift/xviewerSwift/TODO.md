@@ -4,7 +4,7 @@
 - 🔴 rename files on folder
 
 - en status bar necesito mostrar ruta completa de archivo y su nombre
-    El nombre debe permitir ser copiado
+    El nombre debe permitirse ser copiado
 
 - 🟡 Icono de la aplicacion
 

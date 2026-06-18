@@ -370,6 +370,7 @@ struct GridItemCell: View {
     let moveItemAction: (URL) -> Void
     let createNewFolderAction: () -> Void
     let openWithKritaAction: (URL) -> Void
+    let renameItemAction: (URL) -> Void
     
     var body: some View {
         VStack {
@@ -449,6 +450,10 @@ struct GridItemCell: View {
                     Label("Open with Krita", systemImage: "paintpalette")
                 }
             }
+            Divider()
+            Button { renameItemAction(item.url) } label: {
+                Label("Rename...", systemImage: "pencil.line")
+            }
         }
     }
 }
@@ -468,6 +473,13 @@ struct ContentView: View {
     @State private var currentColumnCount: Int = 1
     @State private var metadataString: String = ""
     @State private var currentSortOrder: SortOrder = .name
+    
+    @State private var isShowingSingleRenameAlert = false
+    @State private var singleRenameBaseName: String = ""
+    @State private var itemToRename: URL?
+
+    @State private var isShowingBulkRenameAlert = false
+    @State private var bulkRenameBaseName: String = ""
 
     private var imageItems: [FileItem] {
         folderContents.filter { !$0.isDirectory }
@@ -567,6 +579,9 @@ struct ContentView: View {
                                 },
                                 openWithKritaAction: { url in
                                     openWithKrita(url)
+                                },
+                                renameItemAction: { url in
+                                    promptSingleRename(for: url)
                                 }
                             )
                             .id(item.url)
@@ -637,6 +652,9 @@ struct ContentView: View {
             Divider()
             Button { createNewFolder() } label: {
                 Label("New Folder", systemImage: "folder.badge.plus")
+            }
+            Button { promptBulkRename() } label: {
+                Label("Rename All...", systemImage: "pencil.line")
             }
         }
     }
@@ -984,6 +1002,99 @@ struct ContentView: View {
             if let error = error {
                 print("Error opening with Krita: \(error)")
             }
+        }
+    }
+    
+    private func promptSingleRename(for url: URL) {
+        let baseName = url.deletingPathExtension().lastPathComponent
+        let alert = NSAlert()
+        alert.messageText = "Rename File"
+        alert.informativeText = "Enter a new name (extension will be preserved):"
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        
+        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        textField.stringValue = baseName
+        alert.accessoryView = textField
+        
+        if alert.runModal() == .alertFirstButtonReturn {
+            let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !newName.isEmpty && newName != baseName {
+                executeSingleRename(originalURL: url, newBaseName: newName)
+            }
+        }
+    }
+
+    private func promptBulkRename() {
+        let alert = NSAlert()
+        alert.messageText = "Batch Rename All Files"
+        alert.informativeText = "Enter the base name. Files will be named 'basename_0000X':"
+        alert.addButton(withTitle: "Rename All")
+        alert.addButton(withTitle: "Cancel")
+        
+        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        alert.accessoryView = textField
+        
+        if alert.runModal() == .alertFirstButtonReturn {
+            let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !newName.isEmpty {
+                executeBulkRename(baseName: newName)
+            }
+        }
+    }
+
+    private func executeSingleRename(originalURL: URL, newBaseName: String) {
+        let directory = originalURL.deletingLastPathComponent()
+        let ext = originalURL.pathExtension
+        let newURL = ext.isEmpty ? directory.appendingPathComponent(newBaseName) : directory.appendingPathComponent("\(newBaseName).\(ext)")
+        
+        Task { await processRenames(moves: [(originalURL, newURL)]) }
+    }
+
+    private func executeBulkRename(baseName: String) {
+        guard let dir = currentFolderURL else { return }
+        let filesToRename = folderContents.filter { !$0.isDirectory }
+        
+        var moves: [(URL, URL)] = []
+        for (index, file) in filesToRename.enumerated() {
+            let originalURL = file.url
+            let ext = originalURL.pathExtension
+            let sequenceStr = String(format: "%05d", index + 1)
+            let newFileName = ext.isEmpty ? "\(baseName)_\(sequenceStr)" : "\(baseName)_\(sequenceStr).\(ext)"
+            let newURL = dir.appendingPathComponent(newFileName)
+            moves.append((originalURL, newURL))
+        }
+        
+        Task { await processRenames(moves: moves) }
+    }
+
+    private func processRenames(moves: [(URL, URL)]) async {
+        let parentFolder = currentFolderURL
+        
+        await Task.detached(priority: .userInitiated) {
+            let folderAccessed = parentFolder?.startAccessingSecurityScopedResource() ?? false
+            
+            for (source, destination) in moves {
+                let itemAccessed = source.startAccessingSecurityScopedResource()
+                do {
+                    // Check if file exists to prevent throwing or overwrite implicitly.
+                    if FileManager.default.fileExists(atPath: destination.path) {
+                        print("File already exists at destination: \(destination.path)")
+                        continue
+                    }
+                    try FileManager.default.moveItem(at: source, to: destination)
+                } catch {
+                    print("POSIX/Sandbox Error renaming \(source.lastPathComponent): \(error)")
+                }
+                if itemAccessed {
+                    source.stopAccessingSecurityScopedResource()
+                }
+            }
+            // We do not stop accessing parentFolder since app needs it continuously.
+        }.value
+        
+        if let url = currentFolderURL {
+            self.loadFolder(url: url)
         }
     }
     
