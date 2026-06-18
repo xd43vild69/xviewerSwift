@@ -854,6 +854,13 @@ struct ContentView: View {
         .onChange(of: activeItemURL) { oldURL, newURL in
             updateMetadata(for: newURL)
         }
+        .onOpenURL { url in
+            let dir = url.deletingLastPathComponent()
+            sidebarSelection = dir
+            activeItemURL = url
+            selectedItemURLs = [url]
+            fullScreenImageURL = url
+        }
         .sheet(isPresented: $isShowingProperties) {
             if let url = propertiesURL {
                 PropertiesView(url: url)
@@ -1300,8 +1307,10 @@ struct ContentView: View {
     private func loadFolder(url: URL) {
         currentFolderURL = url
         folderContents = []
-        activeItemURL = nil
-        selectedItemURLs = []
+        if activeItemURL?.deletingLastPathComponent() != url {
+            activeItemURL = nil
+            selectedItemURLs = []
+        }
         
         DispatchQueue.global(qos: .userInitiated).async {
             guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else {

@@ -1,5 +1,8 @@
 🔴 
 
+- si no selecciono nada, la ruta abajo en el statusbar debe ser la del directorio actual
+
+
 - 🟡 terminal integrated into the app, this is the most avance and sync feature
 
 - 🟡 .ContextMenu() 

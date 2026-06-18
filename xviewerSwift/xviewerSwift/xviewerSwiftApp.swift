@@ -10,7 +10,7 @@ import SwiftUI
 @main
 struct xviewerSwiftApp: App {
     var body: some Scene {
-        WindowGroup {
+        Window("xviewerSwift", id: "main") {
             ContentView()
         }
     }
