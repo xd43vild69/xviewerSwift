@@ -9,13 +9,57 @@ struct PropertiesView: View {
     @State private var metadataText: String = "Extracting metadata..."
     @State private var showCopiedFeedback = false
     
+    @State private var searchText: String = ""
+    @State private var currentMatchIndex: Int = 0
+    @State private var totalMatches: Int = 0
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("Properties")
                     .font(.title2)
                     .fontWeight(.bold)
-                Spacer()
+                // Custom search bar
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                    TextField("Search...", text: $searchText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 150)
+                        .onChange(of: searchText) { _ in
+                            currentMatchIndex = 0
+                        }
+                    
+                    if totalMatches > 0 {
+                        Text("\(currentMatchIndex + 1)/\(totalMatches)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .frame(width: 40, alignment: .center)
+                        
+                        Button(action: {
+                            if currentMatchIndex > 0 {
+                                currentMatchIndex -= 1
+                            } else {
+                                currentMatchIndex = totalMatches - 1
+                            }
+                        }) {
+                            Image(systemName: "chevron.up")
+                        }
+                        .buttonStyle(.borderless)
+                        
+                        Button(action: {
+                            if currentMatchIndex < totalMatches - 1 {
+                                currentMatchIndex += 1
+                            } else {
+                                currentMatchIndex = 0
+                            }
+                        }) {
+                            Image(systemName: "chevron.down")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                
                 Button(action: {
                     dismiss()
                 }) {
@@ -29,13 +73,12 @@ struct PropertiesView: View {
             Text(url.lastPathComponent)
                 .font(.headline)
             
-            ScrollView {
-                Text(metadataText)
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-            .padding()
+            SearchableTextView(
+                text: metadataText,
+                searchText: $searchText,
+                currentMatchIndex: $currentMatchIndex,
+                totalMatches: $totalMatches
+            )
             .background(Color(NSColor.textBackgroundColor))
             .cornerRadius(8)
             
@@ -155,6 +198,82 @@ struct PropertiesView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             withAnimation {
                 showCopiedFeedback = false
+            }
+        }
+    }
+}
+
+struct SearchableTextView: NSViewRepresentable {
+    var text: String
+    @Binding var searchText: String
+    @Binding var currentMatchIndex: Int
+    @Binding var totalMatches: Int
+    
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSTextView.scrollableTextView()
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        
+        if let textView = scrollView.documentView as? NSTextView {
+            textView.isEditable = false
+            textView.isSelectable = true
+            textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+            textView.textColor = NSColor.textColor
+            textView.backgroundColor = .clear
+            textView.textContainerInset = NSSize(width: 10, height: 10)
+        }
+        
+        return scrollView
+    }
+    
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        if let textView = nsView.documentView as? NSTextView {
+            if textView.string != text {
+                textView.string = text
+            }
+            
+            let nsString = textView.string as NSString
+            let fullRange = NSRange(location: 0, length: nsString.length)
+            
+            // Limpiar resaltados anteriores
+            textView.layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
+            
+            if searchText.isEmpty {
+                DispatchQueue.main.async {
+                    if self.totalMatches != 0 { self.totalMatches = 0 }
+                }
+                return
+            }
+            
+            var ranges: [NSRange] = []
+            var searchRange = fullRange
+            
+            while searchRange.location < nsString.length {
+                let range = nsString.range(of: searchText, options: .caseInsensitive, range: searchRange)
+                if range.location != NSNotFound {
+                    ranges.append(range)
+                    // Resaltado suave para todas las coincidencias
+                    textView.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.3), forCharacterRange: range)
+                    searchRange.location = range.location + range.length
+                    searchRange.length = nsString.length - searchRange.location
+                } else {
+                    break
+                }
+            }
+            
+            DispatchQueue.main.async {
+                if self.totalMatches != ranges.count {
+                    self.totalMatches = ranges.count
+                }
+            }
+            
+            if !ranges.isEmpty {
+                let safeIndex = max(0, min(currentMatchIndex, ranges.count - 1))
+                let activeRange = ranges[safeIndex]
+                
+                // Resaltado fuerte para la coincidencia actual
+                textView.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NSColor.systemYellow, forCharacterRange: activeRange)
+                textView.scrollRangeToVisible(activeRange)
             }
         }
     }

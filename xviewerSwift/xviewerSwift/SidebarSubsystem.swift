@@ -4,9 +4,9 @@ import CoreFoundation
 // MARK: - 1. ARQUITECTURA DE DATOS (Model & Enum)
 
 enum SidebarSection: String, CaseIterable {
-    case sources = "Fuentes"
-    case bookmarks = "Marcadores"
-    case recent = "Recientes"
+    case sources = "Sources"
+    case bookmarks = "Bookmarks"
+    case recent = "Recents"
 }
 
 struct SidebarFolderItem: Identifiable, Hashable {
