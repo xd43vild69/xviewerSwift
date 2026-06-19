@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreFoundation
+import UniformTypeIdentifiers
 
 // MARK: - 1. ARQUITECTURA DE DATOS (Model & Enum)
 
@@ -174,6 +175,7 @@ class SidebarManager: ObservableObject {
 struct SidebarNavigationView: View {
     @ObservedObject var manager: SidebarManager
     @Binding var selectedFolderURL: URL?
+    var performDropAction: ((URL) -> Void)?
     
     var body: some View {
         List(selection: $selectedFolderURL) {
@@ -181,7 +183,7 @@ struct SidebarNavigationView: View {
             // Sección: Fuentes
             Section(header: Text(SidebarSection.sources.rawValue)) {
                 ForEach(manager.sources) { item in
-                    SidebarItemRow(item: item)
+                    SidebarItemRow(item: item, performDropAction: performDropAction)
                         .tag(item.url)
                 }
             }
@@ -189,7 +191,7 @@ struct SidebarNavigationView: View {
             // Sección: Marcadores
             Section(header: Text(SidebarSection.bookmarks.rawValue)) {
                 ForEach(manager.bookmarks) { item in
-                    SidebarItemRow(item: item)
+                    SidebarItemRow(item: item, performDropAction: performDropAction)
                         .tag(item.url)
                         .contextMenu {
                             Button(role: .destructive) {
@@ -204,7 +206,7 @@ struct SidebarNavigationView: View {
             // Sección: Recientes
             Section(header: Text(SidebarSection.recent.rawValue)) {
                 ForEach(manager.recent) { item in
-                    SidebarItemRow(item: item)
+                    SidebarItemRow(item: item, performDropAction: performDropAction)
                         .tag(item.url)
                 }
             }
@@ -216,8 +218,19 @@ struct SidebarNavigationView: View {
 // Componente visual aislado para mantener limpio el List principal
 fileprivate struct SidebarItemRow: View {
     let item: SidebarFolderItem
+    var performDropAction: ((URL) -> Void)?
+    
+    @State private var isTargeted: Bool = false
     
     var body: some View {
         Label(item.name, systemImage: item.systemIcon)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(isTargeted ? Color.blue.opacity(0.2) : Color.clear)
+            .cornerRadius(4)
+            .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
+                performDropAction?(item.url)
+                return true
+            }
     }
 }

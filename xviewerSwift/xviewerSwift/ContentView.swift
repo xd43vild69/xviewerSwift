@@ -637,6 +637,9 @@ struct GridItemCell: View {
     let isBookmarked: Bool
     let toggleBookmarkAction: () -> Void
     let isSingleSelection: Bool
+    let performDropAction: (URL) -> Void
+    
+    @State private var isTargeted: Bool = false
     
     var body: some View {
         VStack {
@@ -728,6 +731,20 @@ struct GridItemCell: View {
                 .disabled(!isSingleSelection)
             }
         }
+        .onDrag {
+            if !selectedItemURLs.contains(item.url) {
+                selectedItemURLs = [item.url]
+                activeItemURL = item.url
+            }
+            return NSItemProvider(object: item.url as NSURL)
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
+            if item.isDirectory {
+                performDropAction(item.url)
+                return true
+            }
+            return false
+        }
     }
 }
 
@@ -762,7 +779,14 @@ struct ContentView: View {
     }
 
     private var leftPanel: some View {
-        SidebarNavigationView(manager: sidebarManager, selectedFolderURL: $sidebarSelection)
+        SidebarNavigationView(
+            manager: sidebarManager,
+            selectedFolderURL: $sidebarSelection,
+            performDropAction: { destinationURL in
+                let urlsToMove = Array(selectedItemURLs)
+                moveFiles(urls: urlsToMove, to: destinationURL)
+            }
+        )
             .fileImporter(
                 isPresented: $isShowingFolderPicker,
                 allowedContentTypes: [.folder],
@@ -827,7 +851,11 @@ struct ContentView: View {
                                         sidebarManager.pinFolder(url: item.url)
                                     }
                                 },
-                                isSingleSelection: selectedItemURLs.count == 1 && selectedItemURLs.contains(item.url)
+                                isSingleSelection: selectedItemURLs.count == 1 && selectedItemURLs.contains(item.url),
+                                performDropAction: { destinationURL in
+                                    let urlsToMove = Array(selectedItemURLs)
+                                    moveFiles(urls: urlsToMove, to: destinationURL)
+                                }
                             )
                             .id(item.url)
                         }
@@ -1234,6 +1262,47 @@ struct ContentView: View {
             } catch {
                 print("Error moving file: \(error)")
                 NSSound.beep()
+            }
+        }
+    }
+    
+    private func moveFiles(urls: [URL], to destinationDir: URL) {
+        let destAccessed = destinationDir.startAccessingSecurityScopedResource()
+        defer { if destAccessed { destinationDir.stopAccessingSecurityScopedResource() } }
+        
+        var successfullyMoved: Set<URL> = []
+        let fm = FileManager.default
+        
+        for sourceURL in urls {
+            let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
+            
+            let originalName = sourceURL.deletingPathExtension().lastPathComponent
+            let ext = sourceURL.pathExtension
+            var finalURL = destinationDir.appendingPathComponent(sourceURL.lastPathComponent)
+            
+            var counter = 1
+            while fm.fileExists(atPath: finalURL.path) {
+                let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
+                finalURL = destinationDir.appendingPathComponent(newName)
+                counter += 1
+            }
+            
+            do {
+                try fm.moveItem(at: sourceURL, to: finalURL)
+                successfullyMoved.insert(sourceURL)
+            } catch {
+                print("Error moving file \(sourceURL.lastPathComponent): \(error)")
+            }
+            
+            if sourceAccessed {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        
+        if !successfullyMoved.isEmpty {
+            DispatchQueue.main.async {
+                self.folderContents.removeAll(where: { successfullyMoved.contains($0.url) })
+                self.selectedItemURLs.subtract(successfullyMoved)
             }
         }
     }
