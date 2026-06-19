@@ -718,7 +718,7 @@ struct GridItemCell: View {
             }
             Divider()
             Button { renameItemAction(item.url) } label: {
-                Label("Rename...", systemImage: "pencil.line")
+                Label(selectedItemURLs.count > 1 && selectedItemURLs.contains(item.url) ? "Rename \(selectedItemURLs.count) Items..." : "Rename...", systemImage: "pencil.line")
             }
             if !item.isDirectory {
                 Divider()
@@ -809,7 +809,11 @@ struct ContentView: View {
                                     openWithKrita(url)
                                 },
                                 renameItemAction: { url in
-                                    promptSingleRename(for: url)
+                                    if selectedItemURLs.count > 1 && selectedItemURLs.contains(url) {
+                                        promptBulkRename()
+                                    } else {
+                                        promptSingleRename(for: url)
+                                    }
                                 },
                                 showPropertiesAction: { url in
                                     propertiesURL = url
@@ -1401,11 +1405,7 @@ struct ContentView: View {
             filesToRename = folderContents.filter { !$0.isDirectory }
         }
         
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "Debug: Renaming \(filesToRename.count) files"
-            alert.runModal()
-        }
+
         var moves: [(URL, URL)] = []
         for (index, file) in filesToRename.enumerated() {
             let originalURL = file.url

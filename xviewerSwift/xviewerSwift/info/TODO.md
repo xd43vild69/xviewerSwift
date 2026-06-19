@@ -1,18 +1,10 @@
 🔴 
 
-- contar en status bar cuantos archivos hay - total en imagenes y total otros
-
-- en el status bar aparece el tamano de la imagen seleccionada y el nombre, quiero que aparezca el numero de imagens y tambien el numero total de archivos por que algunas veces hay otro tipo de archivos que no son imagenes pero quiero conocer tambien si hay otro tipo de archivos en esta carpeta, para no tener problemas al borrar o hacer otras operaciones en carpetas
-
-- 🟡 terminal integrated into the app, this is the most avance and sync feature
-
 - 🟡 .ContextMenu() 
     click derecho debe mostrar opciones avanzadas como: ordenar - pegar - etc 
     piensa en 3ds max
 
 10. **Etiquetas o Clasificación:** Poder ponerles estrellas (del 1 al 5) o etiquetas de colores tipo Finder a las imágenes para organizarlas mejor.
-
----
 
 
 Priorities
@@ -23,8 +15,6 @@ Estas son funciones básicas que los usuarios esperan de forma casi obligatoria 
 1. **Renombrado de Archivos y Carpetas:** Actualmente podemos mover, eliminar y copiar, pero no podemos cambiarle el nombre a un archivo existente. Poder presionar `Enter` sobre un archivo o hacer doble clic lento para editar su nombre es fundamental.
 2. **Navegación entre Carpetas (Adelante / Atrás):** Si haces doble clic en una subcarpeta, deberías entrar en ella. Además, necesitamos un botón o atajo (`Cmd + Flecha Arriba`) para regresar al directorio padre o navegar por el historial.
 3. **Soporte de Arrastrar y Soltar (Drag & Drop):** Poder seleccionar archivos en nuestra app y arrastrarlos hacia el Finder o hacia Photoshop/Krita, y viceversa (soltar archivos del escritorio hacia nuestra app).
-
-
 
 4. **Deshacer (Undo):** Implementar el clásico `Cmd + Z`. Si borraste una imagen o la moviste por accidente, poder revertir esa acción de forma inmediata.
 
