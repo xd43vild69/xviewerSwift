@@ -285,6 +285,7 @@ struct FullScreenImageView: View {
     
     @State private var nsImage: NSImage?
     @State private var isInverted = false
+    @State private var isBlackAndWhite = false
     @State private var rotationAngle: Double = 0.0
     @StateObject private var zoomState = ZoomState()
     @State private var showUI: Bool = true
@@ -297,11 +298,22 @@ struct FullScreenImageView: View {
             
             if let image = nsImage {
                 Group {
-                    if isInverted {
+                    if isInverted && isBlackAndWhite {
                         Image(nsImage: image)
                             .resizable()
                             .scaledToFit()
                             .colorInvert()
+                            .grayscale(1.0)
+                    } else if isInverted {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .colorInvert()
+                    } else if isBlackAndWhite {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .grayscale(1.0)
                     } else {
                         Image(nsImage: image)
                             .resizable()
@@ -429,6 +441,10 @@ struct FullScreenImageView: View {
                 
             Button(action: { isInverted.toggle() }) { Text("") }
                 .keyboardShortcut("i", modifiers: [.command])
+                .opacity(0)
+                
+            Button(action: { isBlackAndWhite.toggle() }) { Text("") }
+                .keyboardShortcut("b", modifiers: [.command])
                 .opacity(0)
         }
         .zIndex(1)
@@ -784,7 +800,7 @@ struct ContentView: View {
                 Label("New Folder", systemImage: "folder.badge.plus")
             }
             Button { promptBulkRename() } label: {
-                Label("Rename All...", systemImage: "pencil.line")
+                Label(selectedItemURLs.count > 1 ? "Rename \(selectedItemURLs.count) Items..." : "Rename All...", systemImage: "pencil.line")
             }
         }
     }
@@ -1246,9 +1262,9 @@ struct ContentView: View {
 
     private func promptBulkRename() {
         let alert = NSAlert()
-        alert.messageText = "Batch Rename All Files"
-        alert.informativeText = "Enter the base name. Files will be named 'basename_0000X':"
-        alert.addButton(withTitle: "Rename All")
+        alert.messageText = selectedItemURLs.count > 1 ? "Batch Rename \(selectedItemURLs.count) Files" : "Batch Rename All Files"
+        alert.informativeText = "Enter base name for files:"
+        alert.addButton(withTitle: selectedItemURLs.count > 1 ? "Rename" : "Rename All")
         alert.addButton(withTitle: "Cancel")
         
         let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
@@ -1272,8 +1288,19 @@ struct ContentView: View {
 
     private func executeBulkRename(baseName: String) {
         guard let dir = currentFolderURL else { return }
-        let filesToRename = folderContents.filter { !$0.isDirectory }
         
+        let filesToRename: [FileItem]
+        if selectedItemURLs.count > 1 {
+            filesToRename = folderContents.filter { selectedItemURLs.contains($0.url) && !$0.isDirectory }
+        } else {
+            filesToRename = folderContents.filter { !$0.isDirectory }
+        }
+        
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Debug: Renaming \(filesToRename.count) files"
+            alert.runModal()
+        }
         var moves: [(URL, URL)] = []
         for (index, file) in filesToRename.enumerated() {
             let originalURL = file.url
@@ -1284,30 +1311,53 @@ struct ContentView: View {
             moves.append((originalURL, newURL))
         }
         
+        let logStr = moves.map { "\($0.0.lastPathComponent) -> \($0.1.lastPathComponent)" }.joined(separator: "\n")
+        try? logStr.write(toFile: "/tmp/rename_log.txt", atomically: true, encoding: .utf8)
         Task { await processRenames(moves: moves) }
     }
 
+    @MainActor
     private func processRenames(moves: [(URL, URL)]) async {
         let parentFolder = currentFolderURL
+        let parentAccessed = parentFolder?.startAccessingSecurityScopedResource() ?? false
         
-        await Task.detached(priority: .userInitiated) {
-            for (source, destination) in moves {
-                let itemAccessed = source.startAccessingSecurityScopedResource()
-                do {
-                    // Check if file exists to prevent throwing or overwrite implicitly.
-                    if FileManager.default.fileExists(atPath: destination.path) {
-                        print("File already exists at destination: \(destination.path)")
-                        continue
-                    }
-                    try FileManager.default.moveItem(at: source, to: destination)
-                } catch {
-                    print("POSIX/Sandbox Error renaming \(source.lastPathComponent): \(error)")
-                }
-                if itemAccessed {
-                    source.stopAccessingSecurityScopedResource()
-                }
+        // Phase 1: Rename to temporary names to avoid intra-batch collisions
+        var tempMoves: [(URL, URL)] = []
+        for (source, destination) in moves {
+            if source == destination { continue }
+            
+            let itemAccessed = source.startAccessingSecurityScopedResource()
+            let tempName = UUID().uuidString + "_" + source.lastPathComponent
+            let tempURL = source.deletingLastPathComponent().appendingPathComponent(tempName)
+            
+            do {
+                try FileManager.default.moveItem(at: source, to: tempURL)
+                tempMoves.append((tempURL, destination))
+            } catch {
+                print("Error creating temp file for \(source.lastPathComponent): \(error)")
             }
-        }.value
+            
+            if itemAccessed {
+                source.stopAccessingSecurityScopedResource()
+            }
+        }
+        
+        // Phase 2: Rename to final names
+        for (tempURL, destination) in tempMoves {
+            do {
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    print("File already exists at destination: \(destination.path)")
+                    continue
+                }
+                try FileManager.default.moveItem(at: tempURL, to: destination)
+            } catch {
+                print("Error renaming temp file to \(destination.lastPathComponent): \(error)")
+            }
+        }
+        
+        if parentAccessed {
+            parentFolder?.stopAccessingSecurityScopedResource()
+        }
         
         if let url = currentFolderURL {
             self.loadFolder(url: url)

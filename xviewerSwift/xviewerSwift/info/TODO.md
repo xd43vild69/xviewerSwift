@@ -1,6 +1,6 @@
 🔴 
 
-Si mantengo cmd presionado y voy haciendo cmd + c, cmd + c, etc, puedo ir selecionando varias imagenes en el clipboard
+- contar en status bar cuantos archivos hay - total en imagenes y total otros
 
 
 - 🟡 terminal integrated into the app, this is the most avance and sync feature
