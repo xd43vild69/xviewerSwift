@@ -468,11 +468,32 @@ struct FullScreenImageView: View {
     }
 }
 
-struct FramePreferenceKey: PreferenceKey {
-    static var defaultValue: [URL: CGRect] = [:]
-    static func reduce(value: inout [URL: CGRect], nextValue: () -> [URL: CGRect]) {
-        value.merge(nextValue()) { current, _ in current }
+private enum GridLayout {
+    static let padding: CGFloat = 16
+    static let spacing: CGFloat = 16
+    static let cellHeight: CGFloat = 110
+    static let columnWidthDivisor: CGFloat = 116
+
+    static func columnCount(for viewportWidth: CGFloat) -> Int {
+        max(1, Int(viewportWidth / columnWidthDivisor))
     }
+
+    static func cellWidth(viewportWidth: CGFloat, columns: Int) -> CGFloat {
+        (viewportWidth - padding * 2 - spacing * CGFloat(columns - 1)) / CGFloat(columns)
+    }
+
+    static func frame(forIndex index: Int, columns: Int, viewportWidth: CGFloat, scrollMinY: CGFloat) -> CGRect {
+        let cellW = cellWidth(viewportWidth: viewportWidth, columns: columns)
+        let row = index / columns
+        let col = index % columns
+        let x = padding + CGFloat(col) * (cellW + spacing)
+        let y = scrollMinY + padding + CGFloat(row) * (cellHeight + spacing)
+        return CGRect(x: x, y: y, width: cellW, height: cellHeight)
+    }
+}
+
+private enum GridScrollOffset {
+    static var contentMinY: CGFloat = 0
 }
 
 struct GridItemCell: View {
@@ -538,14 +559,8 @@ struct GridItemCell: View {
             }
             activeItemURL = item.url
         }
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(
-                    key: FramePreferenceKey.self,
-                    value: [item.url: geo.frame(in: .named("GridSpace"))]
-                )
-            }
-        )
+        .frame(maxWidth: .infinity)
+        .frame(height: GridLayout.cellHeight)
         .contextMenu {
             Button { currentSortOrder = .name } label: {
                 Label("Order by name", systemImage: currentSortOrder == .name ? "checkmark" : "")
@@ -599,7 +614,6 @@ struct ContentView: View {
     @State private var fullScreenImageURL: URL?
     @State private var selectedItemURLs: Set<URL> = []
     @State private var activeItemURL: URL?
-    @State private var itemFrames: [URL: CGRect] = [:]
     @State private var dragStart: CGPoint?
     @State private var dragCurrent: CGPoint?
     @State private var dragInitialSelection: Set<URL> = []
@@ -660,7 +674,7 @@ struct ContentView: View {
         }
     }
     
-    private func updateSelectionFromDrag() {
+    private func updateSelectionFromDrag(viewportWidth: CGFloat, columns: Int) {
         guard let start = dragStart, let current = dragCurrent else { return }
         let rect = CGRect(
             x: min(start.x, current.x),
@@ -668,11 +682,17 @@ struct ContentView: View {
             width: abs(current.x - start.x),
             height: abs(current.y - start.y)
         )
-        
+
         var newSelection = dragInitialSelection
-        for (url, frame) in itemFrames {
+        for (index, item) in folderContents.enumerated() {
+            let frame = GridLayout.frame(
+                forIndex: index,
+                columns: columns,
+                viewportWidth: viewportWidth,
+                scrollMinY: GridScrollOffset.contentMinY
+            )
             if rect.intersects(frame) {
-                newSelection.insert(url)
+                newSelection.insert(item.url)
             }
         }
         selectedItemURLs = newSelection
@@ -683,10 +703,10 @@ struct ContentView: View {
 
     private var rightPanel: some View {
         GeometryReader { geometry in
-            let columns = max(1, Int(geometry.size.width / 116))
+            let columns = GridLayout.columnCount(for: geometry.size.width)
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 100)), count: columns), spacing: 16) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 100)), count: columns), spacing: GridLayout.spacing) {
                         ForEach(folderContents) { item in
                             GridItemCell(
                                 item: item,
@@ -727,12 +747,20 @@ struct ContentView: View {
                             .id(item.url)
                         }
                     }
-                    .padding()
+                    .padding(GridLayout.padding)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear {
+                                    GridScrollOffset.contentMinY = geo.frame(in: .named("GridSpace")).minY
+                                }
+                                .onChange(of: geo.frame(in: .named("GridSpace")).minY) { _, minY in
+                                    GridScrollOffset.contentMinY = minY
+                                }
+                        }
+                    )
                 }
                 .coordinateSpace(name: "GridSpace")
-                .onPreferenceChange(FramePreferenceKey.self) { frames in
-                    itemFrames = frames
-                }
                 .overlay(dragOverlay)
                 .gesture(
                     DragGesture(minimumDistance: 5)
@@ -742,7 +770,7 @@ struct ContentView: View {
                                 dragInitialSelection = NSEvent.modifierFlags.contains(.command) || NSEvent.modifierFlags.contains(.shift) ? selectedItemURLs : []
                             }
                             dragCurrent = value.location
-                            updateSelectionFromDrag()
+                            updateSelectionFromDrag(viewportWidth: geometry.size.width, columns: columns)
                         }
                         .onEnded { _ in
                             dragStart = nil
