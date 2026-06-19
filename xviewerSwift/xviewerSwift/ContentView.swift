@@ -846,6 +846,10 @@ struct ContentView: View {
             Button(action: { deleteSelectedItem() }) { Text("") }
                 .keyboardShortcut(.delete, modifiers: [.command]) // Cmd + Forward Delete
                 .opacity(0)
+                
+            Button(action: { selectAllItems() }) { Text("") }
+                .keyboardShortcut("a", modifiers: [.command])
+                .opacity(0)
         }
     }
 
@@ -1012,6 +1016,10 @@ struct ContentView: View {
         } else {
             NSSound.beep() // Provide feedback if paste failed or was empty
         }
+    }
+    
+    private func selectAllItems() {
+        selectedItemURLs = Set(folderContents.map { $0.url })
     }
     
     private func deleteSelectedItem() {
