@@ -31,6 +31,9 @@ struct PaneBrowserView: View {
                                 createNewFolderAction: {
                                     session.createNewFolder()
                                 },
+                                newFolderWithSelectionAction: {
+                                    session.createNewFolderWithSelection()
+                                },
                                 openWithKritaAction: { url in
                                     session.openWithKrita(url)
                                 },

@@ -471,7 +471,8 @@ struct FullScreenImageView: View {
             }
         }
         .zIndex(1)
-        .onAppear { loadImage(from: url) }
+        .onAppear {
+            loadImage(from: url) }
         .onChange(of: url) { oldURL, newURL in
             nsImage = nil
             zoomState.reset()
@@ -702,6 +703,7 @@ struct GridItemCell: View {
     let loadFolderAction: (URL) -> Void
     let moveItemAction: (URL) -> Void
     let createNewFolderAction: () -> Void
+    let newFolderWithSelectionAction: () -> Void
     let openWithKritaAction: (URL) -> Void
     let openWithLightroomAction: (URL) -> Void
     let renameItemAction: (URL) -> Void
@@ -778,6 +780,11 @@ struct GridItemCell: View {
             }
             Button { createNewFolderAction() } label: {
                 Label("New Folder", systemImage: "folder.badge.plus")
+            }
+            if !selectedItemURLs.isEmpty {
+                Button { newFolderWithSelectionAction() } label: {
+                    Label("New Folder with Selection (\(selectedItemURLs.count) items)", systemImage: "folder.badge.plus")
+                }
             }
             if item.isDirectory {
                 Divider()
@@ -927,6 +934,32 @@ struct ContentView: View {
         }
     }
 
+        @State private var eventMonitor: Any?
+
+    private func setupKeyboardMonitor() {
+        if eventMonitor == nil {
+            eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                let shiftPressed = event.modifierFlags.contains(.shift)
+                switch event.keyCode {
+                case 123: // Left arrow
+                    activeSession().handleLeftArrow(shift: shiftPressed)
+                    return nil // consume event
+                case 124: // Right arrow
+                    activeSession().handleRightArrow(shift: shiftPressed)
+                    return nil
+                case 125: // Down arrow
+                    activeSession().handleDownArrow(shift: shiftPressed)
+                    return nil
+                case 126: // Up arrow
+                    activeSession().handleUpArrow(shift: shiftPressed)
+                    return nil
+                default:
+                    return event
+                }
+            }
+        }
+    }
+
     private func activeSession() -> BrowserSession {
         if isSplitViewEnabled && activePane == .right {
             return sessionRight
@@ -964,37 +997,20 @@ struct ContentView: View {
             Button(action: { activeSession().navigateUp() }) { Text("") }
                 .keyboardShortcut(.upArrow, modifiers: [.command])
                 .opacity(0)
-                
-            
-            Button(action: { activeSession().handleUpArrow(shift: true) }) { Text("") }
-                .keyboardShortcut(.upArrow, modifiers: [.shift])
-                .opacity(0)
-                
-            Button(action: { activeSession().handleDownArrow(shift: true) }) { Text("") }
-                .keyboardShortcut(.downArrow, modifiers: [.shift])
-                .opacity(0)
-                
-            Button(action: { activeSession().handleLeftArrow(shift: true) }) { Text("") }
-                .keyboardShortcut(.leftArrow, modifiers: [.shift])
-                .opacity(0)
-                
-            Button(action: { activeSession().handleRightArrow(shift: true) }) { Text("") }
-                .keyboardShortcut(.rightArrow, modifiers: [.shift])
-                .opacity(0)
 
-            Button(action: { activeSession().handleUpArrow() }) { Text("") }
+            Button(action: { activeSession().handleUpArrow(shift: NSEvent.modifierFlags.contains(.shift)) }) { Text("") }
                 .keyboardShortcut(.upArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { activeSession().handleDownArrow() }) { Text("") }
+            Button(action: { activeSession().handleDownArrow(shift: NSEvent.modifierFlags.contains(.shift)) }) { Text("") }
                 .keyboardShortcut(.downArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { activeSession().handleLeftArrow() }) { Text("") }
+            Button(action: { activeSession().handleLeftArrow(shift: NSEvent.modifierFlags.contains(.shift)) }) { Text("") }
                 .keyboardShortcut(.leftArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { activeSession().handleRightArrow() }) { Text("") }
+            Button(action: { activeSession().handleRightArrow(shift: NSEvent.modifierFlags.contains(.shift)) }) { Text("") }
                 .keyboardShortcut(.rightArrow, modifiers: [])
                 .opacity(0)
                 

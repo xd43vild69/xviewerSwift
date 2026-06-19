@@ -282,6 +282,43 @@ func copySelectedItemToClipboard() {
         self.metadataString = "\(name)  |  \(sizeStr)\(dimensionsStr)"
     }
     
+    func createNewFolderWithSelection() {
+        guard let currentDir = self.currentFolderURL, !self.selectedItemURLs.isEmpty else { return }
+        
+        let fm = FileManager.default
+        var newFolderName = "new folder"
+        var finalURL = currentDir.appendingPathComponent(newFolderName)
+        var counter = 1
+        
+        while fm.fileExists(atPath: finalURL.path) {
+            newFolderName = "new folder \(counter)"
+            finalURL = currentDir.appendingPathComponent(newFolderName)
+            counter += 1
+        }
+        
+        do {
+            try fm.createDirectory(at: finalURL, withIntermediateDirectories: true, attributes: nil)
+            
+            let itemsToMove = Array(self.selectedItemURLs)
+            for itemURL in itemsToMove {
+                let destURL = finalURL.appendingPathComponent(itemURL.lastPathComponent)
+                try fm.moveItem(at: itemURL, to: destURL)
+            }
+            
+            loadFolder(url: currentDir, sidebarManager: nil)
+            
+            DispatchQueue.main.async {
+                self.selectedItemURLs = [finalURL]
+                self.activeItemURL = finalURL
+                self.promptSingleRename(for: finalURL)
+            }
+            
+        } catch {
+            print("Error creating folder with selection: \(error)")
+            NSSound.beep()
+        }
+    }
+
     func createNewFolder() {
         guard let currentDir = self.currentFolderURL else { return }
         
