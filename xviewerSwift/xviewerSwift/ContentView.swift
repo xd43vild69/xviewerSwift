@@ -755,6 +755,7 @@ struct ContentView: View {
     @State private var bulkRenameBaseName: String = ""
     @State private var showCopiedFeedback: Bool = false
     @State private var folderHistory: [URL: URL] = [:]
+    @State private var otherFileCount: Int = 0
 
     private var imageItems: [FileItem] {
         folderContents.filter { !$0.isDirectory }
@@ -1010,6 +1011,11 @@ struct ContentView: View {
                 }
                 
                 Spacer()
+                
+                Text("\(imageItems.count) images" + (otherFileCount > 0 ? " | \(otherFileCount) other files" : ""))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .padding(.trailing, 8)
                 
                 Text(metadataString)
                     .font(.system(size: 11))
@@ -1585,6 +1591,7 @@ struct ContentView: View {
         
         currentFolderURL = url
         folderContents = []
+        otherFileCount = 0
         
         if let savedActive = folderHistory[url] {
             activeItemURL = savedActive
@@ -1609,6 +1616,7 @@ struct ContentView: View {
             var batch: [FileItem] = []
             var allItems: [FileItem] = []
             let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "webp"]
+            var otherCountLocal = 0
             
             for case let fileURL as URL in enumerator {
                 var isDirectory = false
@@ -1629,6 +1637,8 @@ struct ContentView: View {
                     let ext = fileURL.pathExtension.lowercased()
                     if imageExtensions.contains(ext) {
                         batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
+                    } else {
+                        otherCountLocal += 1
                     }
                 } else {
                     batch.append(FileItem(url: fileURL, name: fileName, isDirectory: true, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
@@ -1643,6 +1653,7 @@ struct ContentView: View {
                     DispatchQueue.main.async {
                         guard self.currentFolderURL == url else { return }
                         self.folderContents = currentItems
+                        self.otherFileCount = otherCountLocal
                         if self.activeItemURL == nil {
                             if let u = currentItems.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
                         }
@@ -1657,6 +1668,7 @@ struct ContentView: View {
                 DispatchQueue.main.async {
                     guard self.currentFolderURL == url else { return }
                     self.folderContents = sortedItems
+                    self.otherFileCount = otherCountLocal
                     if self.activeItemURL == nil {
                         if let u = sortedItems.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
                     }
@@ -1665,6 +1677,7 @@ struct ContentView: View {
                 DispatchQueue.main.async {
                     guard self.currentFolderURL == url else { return }
                     self.folderContents = []
+                    self.otherFileCount = otherCountLocal
                 }
             }
         }
