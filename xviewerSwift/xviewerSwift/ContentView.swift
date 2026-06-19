@@ -910,6 +910,14 @@ struct ContentView: View {
 
     private var shortcutsGroup: some View {
         Group {
+            Button(action: {
+                if isSplitViewEnabled {
+                    activePane = (activePane == .left) ? .right : .left
+                }
+            }) { Text("") }
+                .keyboardShortcut(.tab, modifiers: [])
+                .opacity(0)
+                
             Button(action: { activeSession().navigateUp() }) { Text("") }
                 .keyboardShortcut(.upArrow, modifiers: [.command])
                 .opacity(0)
