@@ -58,11 +58,13 @@ class SidebarManager: ObservableObject {
     /// Búfer por Frecuencia de Uso (Max: 7) para carpetas recientes
     func recordRecentVisit(url: URL) {
         if let index = recent.firstIndex(where: { $0.url == url }) {
-            recent[index].visitCount += 1
+            var item = recent.remove(at: index)
+            item.visitCount += 1
+            recent.insert(item, at: 0)
         } else {
             let bData = createBookmark(for: url)
             let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "clock", visitCount: 1, bookmarkData: bData)
-            recent.append(newItem)
+            recent.insert(newItem, at: 0)
         }
         
         // Ordenamiento descendente por peso de frecuencia (Frequency Metric)
@@ -122,7 +124,13 @@ class SidebarManager: ObservableObject {
     
     private func loadState() {
         bookmarks = loadItems(forKey: bookmarksKey)
-        recent = loadItems(forKey: recentKey)
+        
+        let loadedRecent = loadItems(forKey: recentKey)
+        recent = loadedRecent.map { item in
+            var modifiedItem = item
+            modifiedItem.visitCount = 1
+            return modifiedItem
+        }
     }
     
     private func saveItems(_ items: [SidebarFolderItem], forKey key: String) {
@@ -202,12 +210,6 @@ struct SidebarNavigationView: View {
             }
         }
         .listStyle(.sidebar)
-        // Capturamos el cambio de carpeta global para alimentar el FIFO de Recientes
-        .onChange(of: selectedFolderURL) { oldURL, newURL in
-            if let targetURL = newURL {
-                manager.recordRecentVisit(url: targetURL)
-            }
-        }
     }
 }
 

@@ -1328,6 +1328,7 @@ struct ContentView: View {
     }
     
     private func loadFolder(url: URL) {
+        sidebarManager.recordRecentVisit(url: url)
         if let current = currentFolderURL, let active = activeItemURL {
             folderHistory[current] = active
         }

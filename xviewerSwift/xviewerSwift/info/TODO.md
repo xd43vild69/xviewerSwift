@@ -3,10 +3,6 @@
 
 
 
-
-- cuando estoy en modo full screen y navego entre imagenes, el aplicativo debe en el fondo tambien moviendo la seleccion en la que se encuentra y si retorno al modo normal, la imagen seleccionada debe ser la misma en la que estaba en modo full screen 
-
-
 - 🟡 terminal integrated into the app, this is the most avance and sync feature
 
 - 🟡 .ContextMenu() 
