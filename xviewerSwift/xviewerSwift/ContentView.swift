@@ -496,8 +496,134 @@ private enum GridScrollOffset {
     static var contentMinY: CGFloat = 0
 }
 
+private struct RubberBandSelectionGesture: ViewModifier {
+    @Binding var selectedItemURLs: Set<URL>
+    @Binding var activeItemURL: URL?
+    let folderContents: [FileItem]
+    let columns: Int
+    let viewportWidth: CGFloat
+
+    @State private var dragStart: CGPoint?
+    @State private var dragCurrent: CGPoint?
+    @State private var dragInitialSelection: Set<URL> = []
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                rubberBandOverlay
+                    .allowsHitTesting(false)
+            }
+            .gesture(
+                DragGesture(minimumDistance: 5)
+                    .onChanged { value in
+                        if dragStart == nil {
+                            dragStart = value.startLocation
+                            dragInitialSelection = NSEvent.modifierFlags.contains(.command) || NSEvent.modifierFlags.contains(.shift)
+                                ? selectedItemURLs
+                                : []
+                        }
+                        dragCurrent = value.location
+                        applySelectionFromDrag()
+                    }
+                    .onEnded { _ in
+                        dragStart = nil
+                        dragCurrent = nil
+                        dragInitialSelection = []
+                    }
+            )
+    }
+
+    @ViewBuilder
+    private var rubberBandOverlay: some View {
+        if let start = dragStart, let current = dragCurrent {
+            let rect = dragRect(from: start, to: current)
+            Rectangle()
+                .fill(Color.blue.opacity(0.2))
+                .border(Color.blue, width: 1)
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+        }
+    }
+
+    private func dragRect(from start: CGPoint, to current: CGPoint) -> CGRect {
+        CGRect(
+            x: min(start.x, current.x),
+            y: min(start.y, current.y),
+            width: abs(current.x - start.x),
+            height: abs(current.y - start.y)
+        )
+    }
+
+    private func applySelectionFromDrag() {
+        guard let start = dragStart, let current = dragCurrent else { return }
+        let rect = dragRect(from: start, to: current)
+        let newSelection = selection(for: rect)
+
+        guard newSelection != selectedItemURLs else { return }
+        selectedItemURLs = newSelection
+        if let first = newSelection.first {
+            activeItemURL = first
+        }
+    }
+
+    private func selection(for rect: CGRect) -> Set<URL> {
+        var result = dragInitialSelection
+        let itemCount = folderContents.count
+        guard itemCount > 0, columns > 0 else { return result }
+
+        let cellW = GridLayout.cellWidth(viewportWidth: viewportWidth, columns: columns)
+        let rowStride = GridLayout.cellHeight + GridLayout.spacing
+        let colStride = cellW + GridLayout.spacing
+        let scrollMinY = GridScrollOffset.contentMinY
+
+        let minRow = max(0, Int(floor((rect.minY - scrollMinY - GridLayout.padding - GridLayout.cellHeight) / rowStride)))
+        let maxRow = min((itemCount - 1) / columns, Int(floor((rect.maxY - scrollMinY - GridLayout.padding) / rowStride)))
+        guard minRow <= maxRow else { return result }
+
+        let minCol = max(0, Int(floor((rect.minX - GridLayout.padding - cellW) / colStride)))
+        let maxCol = min(columns - 1, Int(floor((rect.maxX - GridLayout.padding) / colStride)))
+        guard minCol <= maxCol else { return result }
+
+        for row in minRow...maxRow {
+            for col in minCol...maxCol {
+                let index = row * columns + col
+                guard index < itemCount else { continue }
+                let frame = GridLayout.frame(
+                    forIndex: index,
+                    columns: columns,
+                    viewportWidth: viewportWidth,
+                    scrollMinY: scrollMinY
+                )
+                if rect.intersects(frame) {
+                    result.insert(folderContents[index].url)
+                }
+            }
+        }
+        return result
+    }
+}
+
+private extension View {
+    func rubberBandSelection(
+        selectedItemURLs: Binding<Set<URL>>,
+        activeItemURL: Binding<URL?>,
+        folderContents: [FileItem],
+        columns: Int,
+        viewportWidth: CGFloat
+    ) -> some View {
+        modifier(RubberBandSelectionGesture(
+            selectedItemURLs: selectedItemURLs,
+            activeItemURL: activeItemURL,
+            folderContents: folderContents,
+            columns: columns,
+            viewportWidth: viewportWidth
+        ))
+    }
+}
+
 struct GridItemCell: View {
     let item: FileItem
+    let isSelected: Bool
     @Binding var selectedItemURLs: Set<URL>
     @Binding var activeItemURL: URL?
     @Binding var fullScreenImageURL: URL?
@@ -531,11 +657,11 @@ struct GridItemCell: View {
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(selectedItemURLs.contains(item.url) ? Color.blue.opacity(0.2) : Color.clear)
+                .fill(isSelected ? Color.blue.opacity(0.2) : Color.clear)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(selectedItemURLs.contains(item.url) ? Color.blue : Color.clear, lineWidth: 2)
+                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
         )
         .help(item.url.lastPathComponent)
         .onTapGesture(count: 2) {
@@ -614,9 +740,6 @@ struct ContentView: View {
     @State private var fullScreenImageURL: URL?
     @State private var selectedItemURLs: Set<URL> = []
     @State private var activeItemURL: URL?
-    @State private var dragStart: CGPoint?
-    @State private var dragCurrent: CGPoint?
-    @State private var dragInitialSelection: Set<URL> = []
     @State private var currentColumnCount: Int = 1
     @State private var metadataString: String = ""
     @State private var currentSortOrder: SortOrder = .name
@@ -657,50 +780,6 @@ struct ContentView: View {
             }
     }
     
-    @ViewBuilder
-    private var dragOverlay: some View {
-        if let start = dragStart, let current = dragCurrent {
-            let rect = CGRect(
-                x: min(start.x, current.x),
-                y: min(start.y, current.y),
-                width: abs(current.x - start.x),
-                height: abs(current.y - start.y)
-            )
-            Rectangle()
-                .fill(Color.blue.opacity(0.2))
-                .border(Color.blue, width: 1)
-                .frame(width: rect.width, height: rect.height)
-                .position(x: rect.midX, y: rect.midY)
-        }
-    }
-    
-    private func updateSelectionFromDrag(viewportWidth: CGFloat, columns: Int) {
-        guard let start = dragStart, let current = dragCurrent else { return }
-        let rect = CGRect(
-            x: min(start.x, current.x),
-            y: min(start.y, current.y),
-            width: abs(current.x - start.x),
-            height: abs(current.y - start.y)
-        )
-
-        var newSelection = dragInitialSelection
-        for (index, item) in folderContents.enumerated() {
-            let frame = GridLayout.frame(
-                forIndex: index,
-                columns: columns,
-                viewportWidth: viewportWidth,
-                scrollMinY: GridScrollOffset.contentMinY
-            )
-            if rect.intersects(frame) {
-                newSelection.insert(item.url)
-            }
-        }
-        selectedItemURLs = newSelection
-        if let first = newSelection.first {
-            activeItemURL = first
-        }
-    }
-
     private var rightPanel: some View {
         GeometryReader { geometry in
             let columns = GridLayout.columnCount(for: geometry.size.width)
@@ -710,6 +789,7 @@ struct ContentView: View {
                         ForEach(folderContents) { item in
                             GridItemCell(
                                 item: item,
+                                isSelected: selectedItemURLs.contains(item.url),
                                 selectedItemURLs: $selectedItemURLs,
                                 activeItemURL: $activeItemURL,
                                 fullScreenImageURL: $fullScreenImageURL,
@@ -761,21 +841,12 @@ struct ContentView: View {
                     )
                 }
                 .coordinateSpace(name: "GridSpace")
-                .overlay(dragOverlay)
-                .gesture(
-                    DragGesture(minimumDistance: 5)
-                        .onChanged { value in
-                            if dragStart == nil {
-                                dragStart = value.startLocation
-                                dragInitialSelection = NSEvent.modifierFlags.contains(.command) || NSEvent.modifierFlags.contains(.shift) ? selectedItemURLs : []
-                            }
-                            dragCurrent = value.location
-                            updateSelectionFromDrag(viewportWidth: geometry.size.width, columns: columns)
-                        }
-                        .onEnded { _ in
-                            dragStart = nil
-                            dragCurrent = nil
-                        }
+                .rubberBandSelection(
+                    selectedItemURLs: $selectedItemURLs,
+                    activeItemURL: $activeItemURL,
+                    folderContents: folderContents,
+                    columns: columns,
+                    viewportWidth: geometry.size.width
                 )
                 .onChange(of: activeItemURL) { oldURL, newURL in
                     if let url = newURL {
