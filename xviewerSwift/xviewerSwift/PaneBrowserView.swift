@@ -99,8 +99,8 @@ struct PaneBrowserView: View {
                     }
                 }
             }
-            .onChange(of: columns) { oldValue, newValue in
-                session.currentColumnCount = newValue
+            .onChange(of: geometry.size.width) { oldWidth, newWidth in
+                session.currentColumnCount = GridLayout.columnCount(for: newWidth)
             }
             .onChange(of: session.currentSortOrder) { oldOrder, newOrder in
                 session.folderContents = session.sortItems(session.folderContents)
