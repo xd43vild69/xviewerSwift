@@ -536,35 +536,35 @@ func copySelectedItemToClipboard() {
         }
     }
     
-    func handleUpArrow() {
+    func handleUpArrow(shift: Bool = false) {
         if self.fullScreenImageURL == nil {
-            navigateGridRow(direction: -1)
+            navigateGridRow(direction: -1, shift: shift)
         }
     }
     
-    func handleDownArrow() {
+    func handleDownArrow(shift: Bool = false) {
         if self.fullScreenImageURL == nil {
-            navigateGridRow(direction: 1)
+            navigateGridRow(direction: 1, shift: shift)
         }
     }
     
-    func handleLeftArrow() {
+    func handleLeftArrow(shift: Bool = false) {
         if self.fullScreenImageURL != nil {
             navigateFullScreen(direction: -1)
         } else {
-            navigateGrid(direction: -1)
+            navigateGrid(direction: -1, shift: shift)
         }
     }
     
-    func handleRightArrow() {
+    func handleRightArrow(shift: Bool = false) {
         if self.fullScreenImageURL != nil {
             navigateFullScreen(direction: 1)
         } else {
-            navigateGrid(direction: 1)
+            navigateGrid(direction: 1, shift: shift)
         }
     }
     
-    func navigateGridRow(direction: Int) {
+    func navigateGridRow(direction: Int, shift: Bool) {
         guard !self.folderContents.isEmpty else { return }
         guard let currentSelected = self.activeItemURL, let currentIndex = self.folderContents.firstIndex(where: { $0.url == currentSelected }) else {
             if let url = self.folderContents.first?.url {
@@ -574,16 +574,26 @@ func copySelectedItemToClipboard() {
             return
         }
         let newIndex = currentIndex + (direction * currentColumnCount)
+        var targetURL: URL? = nil
         if newIndex >= 0 && newIndex < self.folderContents.count {
-            self.activeItemURL = self.folderContents[newIndex].url; self.selectedItemURLs = [self.folderContents[newIndex].url]
+            targetURL = self.folderContents[newIndex].url
         } else if newIndex < 0 {
-            if let u = self.folderContents.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
+            targetURL = self.folderContents.first?.url
         } else if newIndex >= self.folderContents.count {
-            if let u = self.folderContents.last?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
+            targetURL = self.folderContents.last?.url
+        }
+        
+        if let newURL = targetURL {
+            self.activeItemURL = newURL
+            if shift {
+                self.selectedItemURLs.insert(newURL)
+            } else {
+                self.selectedItemURLs = [newURL]
+            }
         }
     }
     
-    func navigateGrid(direction: Int) {
+    func navigateGrid(direction: Int, shift: Bool) {
         guard !self.folderContents.isEmpty else { return }
         guard let currentSelected = self.activeItemURL, let currentIndex = self.folderContents.firstIndex(where: { $0.url == currentSelected }) else {
             if let url = self.folderContents.first?.url {
@@ -594,7 +604,13 @@ func copySelectedItemToClipboard() {
         }
         let newIndex = currentIndex + direction
         if newIndex >= 0 && newIndex < self.folderContents.count {
-            self.activeItemURL = self.folderContents[newIndex].url; self.selectedItemURLs = [self.folderContents[newIndex].url]
+            let newURL = self.folderContents[newIndex].url
+            self.activeItemURL = newURL
+            if shift {
+                self.selectedItemURLs.insert(newURL)
+            } else {
+                self.selectedItemURLs = [newURL]
+            }
         }
     }
     

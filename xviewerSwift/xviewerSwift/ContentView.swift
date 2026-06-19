@@ -965,6 +965,23 @@ struct ContentView: View {
                 .keyboardShortcut(.upArrow, modifiers: [.command])
                 .opacity(0)
                 
+            
+            Button(action: { activeSession().handleUpArrow(shift: true) }) { Text("") }
+                .keyboardShortcut(.upArrow, modifiers: [.shift])
+                .opacity(0)
+                
+            Button(action: { activeSession().handleDownArrow(shift: true) }) { Text("") }
+                .keyboardShortcut(.downArrow, modifiers: [.shift])
+                .opacity(0)
+                
+            Button(action: { activeSession().handleLeftArrow(shift: true) }) { Text("") }
+                .keyboardShortcut(.leftArrow, modifiers: [.shift])
+                .opacity(0)
+                
+            Button(action: { activeSession().handleRightArrow(shift: true) }) { Text("") }
+                .keyboardShortcut(.rightArrow, modifiers: [.shift])
+                .opacity(0)
+
             Button(action: { activeSession().handleUpArrow() }) { Text("") }
                 .keyboardShortcut(.upArrow, modifiers: [])
                 .opacity(0)
