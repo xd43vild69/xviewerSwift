@@ -2,6 +2,10 @@
 
 - si no selecciono nada, la ruta abajo en el statusbar debe ser la del directorio actual
 
+- cuando retorno de una carpeta hija a una padre, el sistema debe recordar cual fue desde que directorio fue el ultimo que se posiciono la seleccion y volver al mismo origen, pensarlo de manera recursiva para tener un mapa de navegacion mas amigable
+
+- cuando estoy en modo full screen y navego entre imagenes, el aplicativo debe en el fondo tambien moviendo la seleccion en la que se encuentra y si retorno al modo normal, la imagen seleccionada debe ser la misma en la que estaba en modo full screen 
+
 
 - 🟡 terminal integrated into the app, this is the most avance and sync feature
 

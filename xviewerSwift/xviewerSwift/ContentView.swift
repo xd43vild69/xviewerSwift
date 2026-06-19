@@ -338,6 +338,14 @@ struct FullScreenImageView: View {
                 .keyboardShortcut(.rightArrow, modifiers: [])
                 .opacity(0)
                 
+            Button(action: { navigateImage(-1) }) { Text("") }
+                .keyboardShortcut(.upArrow, modifiers: [])
+                .opacity(0)
+            
+            Button(action: { navigateImage(1) }) { Text("") }
+                .keyboardShortcut(.downArrow, modifiers: [])
+                .opacity(0)
+                
             Button(action: { rotationAngle -= 90.0 }) { Text("") }
                 .keyboardShortcut(.leftArrow, modifiers: [.command])
                 .opacity(0)
@@ -728,6 +736,10 @@ struct ContentView: View {
                 
             Button(action: { handleEnter() }) { Text("") }
                 .keyboardShortcut(.space, modifiers: [])
+                .opacity(0)
+                
+            Button(action: { handleEnter() }) { Text("") }
+                .keyboardShortcut(.return, modifiers: [])
                 .opacity(0)
                 
             Button(action: { handleEnter() }) { Text("") }
