@@ -565,35 +565,9 @@ struct FullScreenImageView: View {
     }
 }
 
-private enum GridLayout {
-    static let padding: CGFloat = 16
-    static let spacing: CGFloat = 16
-    static let cellHeight: CGFloat = 110
-    static let columnWidthDivisor: CGFloat = 116
 
-    static func columnCount(for viewportWidth: CGFloat) -> Int {
-        max(1, Int(viewportWidth / columnWidthDivisor))
-    }
 
-    static func cellWidth(viewportWidth: CGFloat, columns: Int) -> CGFloat {
-        (viewportWidth - padding * 2 - spacing * CGFloat(columns - 1)) / CGFloat(columns)
-    }
-
-    static func frame(forIndex index: Int, columns: Int, viewportWidth: CGFloat, scrollMinY: CGFloat) -> CGRect {
-        let cellW = cellWidth(viewportWidth: viewportWidth, columns: columns)
-        let row = index / columns
-        let col = index % columns
-        let x = padding + CGFloat(col) * (cellW + spacing)
-        let y = scrollMinY + padding + CGFloat(row) * (cellHeight + spacing)
-        return CGRect(x: x, y: y, width: cellW, height: cellHeight)
-    }
-}
-
-private enum GridScrollOffset {
-    static var contentMinY: CGFloat = 0
-}
-
-private struct RubberBandSelectionGesture: ViewModifier {
+struct RubberBandSelectionGesture: ViewModifier {
     @Binding var selectedItemURLs: Set<URL>
     @Binding var activeItemURL: URL?
     let folderContents: [FileItem]
@@ -700,7 +674,7 @@ private struct RubberBandSelectionGesture: ViewModifier {
     }
 }
 
-private extension View {
+extension View {
     func rubberBandSelection(
         selectedItemURLs: Binding<Set<URL>>,
         activeItemURL: Binding<URL?>,
@@ -850,15 +824,34 @@ struct GridItemCell: View {
 }
 
 
-class BrowserSession: ObservableObject {
-    @Published var currentFolderURL: URL?
-    @Published var folderContents: [FileItem] = []
-    @Published var fullScreenImageURL: URL?
-    @Published var selectedItemURLs: Set<URL> = []
-    @Published var activeItemURL: URL?
-    @Published var currentSortOrder: SortOrder = .name
-    @Published var metadataString: String = ""
-    @Published var otherFileCount: Int = 0
+
+
+enum GridLayout {
+    static let padding: CGFloat = 16
+    static let spacing: CGFloat = 16
+    static let cellHeight: CGFloat = 110
+    static let columnWidthDivisor: CGFloat = 116
+
+    static func columnCount(for viewportWidth: CGFloat) -> Int {
+        max(1, Int(viewportWidth / columnWidthDivisor))
+    }
+
+    static func cellWidth(viewportWidth: CGFloat, columns: Int) -> CGFloat {
+        (viewportWidth - padding * 2 - spacing * CGFloat(columns - 1)) / CGFloat(columns)
+    }
+
+    static func frame(forIndex index: Int, columns: Int, viewportWidth: CGFloat, scrollMinY: CGFloat) -> CGRect {
+        let cellW = cellWidth(viewportWidth: viewportWidth, columns: columns)
+        let row = index / columns
+        let col = index % columns
+        let x = padding + CGFloat(col) * (cellW + spacing)
+        let y = scrollMinY + padding + CGFloat(row) * (cellHeight + spacing)
+        return CGRect(x: x, y: y, width: cellW, height: cellHeight)
+    }
+}
+
+enum GridScrollOffset {
+    static var contentMinY: CGFloat = 0
 }
 
 struct ContentView: View {
@@ -867,22 +860,6 @@ struct ContentView: View {
     @State private var sidebarSelection: URL?
     @StateObject private var session = BrowserSession()
     @State private var currentColumnCount: Int = 1
-    
-    @State private var isShowingProperties = false
-    @State private var propertiesURL: URL?
-    
-    @State private var isShowingSingleRenameAlert = false
-    @State private var singleRenameBaseName: String = ""
-    @State private var itemToRename: URL?
-
-    @State private var isShowingBulkRenameAlert = false
-    @State private var bulkRenameBaseName: String = ""
-    @State private var showCopiedFeedback: Bool = false
-    @State private var folderHistory: [URL: URL] = [:]
-
-    private var imageItems: [FileItem] {
-        session.folderContents.filter { !$0.isDirectory }
-    }
 
     private var leftPanel: some View {
         SidebarNavigationView(
@@ -890,7 +867,7 @@ struct ContentView: View {
             selectedFolderURL: $sidebarSelection,
             performDropAction: { destinationURL in
                 let urlsToMove = Array(session.selectedItemURLs)
-                moveFiles(urls: urlsToMove, to: destinationURL)
+                session.moveFiles(urls: urlsToMove, to: destinationURL)
             }
         )
             .fileImporter(
@@ -903,7 +880,7 @@ struct ContentView: View {
                     if let rawURL = urls.first {
                         let secureURL = sidebarManager.makeSecureURL(rawURL)
                         sidebarSelection = secureURL
-                        saveBookmark(for: secureURL)
+                        session.saveBookmark(for: secureURL)
                     }
                 case .failure(let error):
                     print("Error selecting folder: \(error.localizedDescription)")
@@ -911,200 +888,67 @@ struct ContentView: View {
             }
     }
     
-    private var rightPanel: some View {
-        GeometryReader { geometry in
-            let columns = GridLayout.columnCount(for: geometry.size.width)
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 100)), count: columns), spacing: GridLayout.spacing) {
-                        ForEach(session.folderContents) { item in
-                            GridItemCell(
-                                item: item,
-                                isSelected: session.selectedItemURLs.contains(item.url),
-                                selectedItemURLs: $session.selectedItemURLs,
-                                activeItemURL: $session.activeItemURL,
-                                fullScreenImageURL: $session.fullScreenImageURL,
-                                currentSortOrder: $session.currentSortOrder,
-                                loadFolderAction: { url in
-                                    sidebarSelection = nil
-                                    loadFolder(url: url)
-                                },
-                                moveItemAction: { url in
-                                    moveItem(url)
-                                },
-                                createNewFolderAction: {
-                                    createNewFolder()
-                                },
-                                openWithKritaAction: { url in
-                                    openWithKrita(url)
-                                },
-                                openWithLightroomAction: { url in
-                                    openWithLightroom(url)
-                                },
-                                renameItemAction: { url in
-                                    if session.selectedItemURLs.count > 1 && session.selectedItemURLs.contains(url) {
-                                        promptBulkRename()
-                                    } else {
-                                        promptSingleRename(for: url)
-                                    }
-                                },
-                                showPropertiesAction: { url in
-                                    propertiesURL = url
-                                    isShowingProperties = true
-                                },
-                                isBookmarked: sidebarManager.bookmarks.contains(where: { $0.url == item.url }),
-                                toggleBookmarkAction: {
-                                    if sidebarManager.bookmarks.contains(where: { $0.url == item.url }) {
-                                        sidebarManager.unpinFolder(url: item.url)
-                                    } else {
-                                        sidebarManager.pinFolder(url: item.url)
-                                    }
-                                },
-                                isSingleSelection: session.selectedItemURLs.count == 1 && session.selectedItemURLs.contains(item.url),
-                                performDropAction: { destinationURL in
-                                    let urlsToMove = Array(session.selectedItemURLs)
-                                    moveFiles(urls: urlsToMove, to: destinationURL)
-                                }
-                            )
-                            .id(item.url)
-                        }
-                    }
-                    .padding(GridLayout.padding)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear
-                                .onAppear {
-                                    GridScrollOffset.contentMinY = geo.frame(in: .named("GridSpace")).minY
-                                }
-                                .onChange(of: geo.frame(in: .named("GridSpace")).minY) { _, minY in
-                                    GridScrollOffset.contentMinY = minY
-                                }
-                        }
-                    )
-                }
-                .coordinateSpace(name: "GridSpace")
-                .rubberBandSelection(
-                    selectedItemURLs: $session.selectedItemURLs,
-                    activeItemURL: $session.activeItemURL,
-                    folderContents: session.folderContents,
-                    columns: columns,
-                    viewportWidth: geometry.size.width
-                )
-                .onChange(of: session.activeItemURL) { oldURL, newURL in
-                    if let url = newURL {
-                        proxy.scrollTo(url)
-                    }
-                }
-                .onChange(of: session.folderContents) { _, newContents in
-                    if !newContents.isEmpty, let url = session.activeItemURL {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            proxy.scrollTo(url)
-                        }
-                    }
-                }
-            }
-            .onChange(of: columns) { oldValue, newValue in
-                currentColumnCount = newValue
-            }
-            .onChange(of: session.currentSortOrder) { oldOrder, newOrder in
-                session.folderContents = sortItems(session.folderContents)
-            }
-            .onAppear {
-                currentColumnCount = columns
-                if let url = restoreBookmark() {
-                    sidebarSelection = url
-                } else {
-                    let home = FileManager.default.homeDirectoryForCurrentUser
-                    sidebarSelection = home
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            session.selectedItemURLs.removeAll()
-            session.activeItemURL = nil
-        }
-        .contextMenu {
-            Button { session.currentSortOrder = .name } label: {
-                Label("Order by name", systemImage: session.currentSortOrder == .name ? "checkmark" : "")
-            }
-            Button { session.currentSortOrder = .date } label: {
-                Label("Order by date", systemImage: session.currentSortOrder == .date ? "checkmark" : "")
-            }
-            Button { session.currentSortOrder = .size } label: {
-                Label("Order by size", systemImage: session.currentSortOrder == .size ? "checkmark" : "")
-            }
-            Divider()
-            Button { createNewFolder() } label: {
-                Label("New Folder", systemImage: "folder.badge.plus")
-            }
-            Button { promptBulkRename() } label: {
-                Label(session.selectedItemURLs.count > 1 ? "Rename \(session.selectedItemURLs.count) Items..." : "Rename All...", systemImage: "pencil.line")
-            }
-        }
-    }
+    
 
     private var shortcutsGroup: some View {
         Group {
-            Button(action: { navigateUp() }) { Text("") }
+            Button(action: { session.navigateUp() }) { Text("") }
                 .keyboardShortcut(.upArrow, modifiers: [.command])
                 .opacity(0)
                 
-            Button(action: { handleUpArrow() }) { Text("") }
+            Button(action: { session.handleUpArrow() }) { Text("") }
                 .keyboardShortcut(.upArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { handleDownArrow() }) { Text("") }
+            Button(action: { session.handleDownArrow() }) { Text("") }
                 .keyboardShortcut(.downArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { handleLeftArrow() }) { Text("") }
+            Button(action: { session.handleLeftArrow() }) { Text("") }
                 .keyboardShortcut(.leftArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { handleRightArrow() }) { Text("") }
+            Button(action: { session.handleRightArrow() }) { Text("") }
                 .keyboardShortcut(.rightArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { handleEnter() }) { Text("") }
+            Button(action: { session.handleEnter() }) { Text("") }
                 .keyboardShortcut(.space, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { handleEnter() }) { Text("") }
+            Button(action: { session.handleEnter() }) { Text("") }
                 .keyboardShortcut(.return, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { handleEnter() }) { Text("") }
+            Button(action: { session.handleEnter() }) { Text("") }
                 .keyboardShortcut(.downArrow, modifiers: [.command])
                 .opacity(0)
                 
-            Button(action: { copySelectedItemToClipboard() }) { Text("") }
+            Button(action: { session.copySelectedItemToClipboard() }) { Text("") }
                 .keyboardShortcut("c", modifiers: [.command])
                 .opacity(0)
                 
-            Button(action: { pasteFromClipboard() }) { Text("") }
+            Button(action: { session.pasteFromClipboard() }) { Text("") }
                 .keyboardShortcut("v", modifiers: [.command])
                 .opacity(0)
                 
-            Button(action: { deleteSelectedItem() }) { Text("") }
+            Button(action: { session.deleteSelectedItem() }) { Text("") }
                 .keyboardShortcut(KeyEquivalent("\u{7F}"), modifiers: []) // Backspace
                 .opacity(0)
                 
-            Button(action: { deleteSelectedItem() }) { Text("") }
+            Button(action: { session.deleteSelectedItem() }) { Text("") }
                 .keyboardShortcut(KeyEquivalent("\u{7F}"), modifiers: [.command]) // Cmd + Backspace
                 .opacity(0)
                 
-            Button(action: { deleteSelectedItem() }) { Text("") }
+            Button(action: { session.deleteSelectedItem() }) { Text("") }
                 .keyboardShortcut(.delete, modifiers: []) // Forward Delete
                 .opacity(0)
                 
-            Button(action: { deleteSelectedItem() }) { Text("") }
+            Button(action: { session.deleteSelectedItem() }) { Text("") }
                 .keyboardShortcut(.delete, modifiers: [.command]) // Cmd + Forward Delete
                 .opacity(0)
                 
-            Button(action: { selectAllItems() }) { Text("") }
+            Button(action: { session.selectAllItems() }) { Text("") }
                 .keyboardShortcut("a", modifiers: [.command])
                 .opacity(0)
         }
@@ -1133,18 +977,18 @@ struct ContentView: View {
                             pasteboard.setString(url.path, forType: .string)
                             
                             withAnimation {
-                                showCopiedFeedback = true
+                                session.showCopiedFeedback = true
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                                 withAnimation {
-                                    showCopiedFeedback = false
+                                    session.showCopiedFeedback = false
                                 }
                             }
                         }
-                        .opacity(showCopiedFeedback ? 0.3 : 1.0)
+                        .opacity(session.showCopiedFeedback ? 0.3 : 1.0)
                 }
                 
-                if showCopiedFeedback {
+                if session.showCopiedFeedback {
                     Text("(Copied to clipboard)")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.green)
@@ -1153,7 +997,7 @@ struct ContentView: View {
                 
                 Spacer()
                 
-                Text("\(imageItems.count) images" + (session.otherFileCount > 0 ? " | \(session.otherFileCount) other files" : ""))
+                Text("\(session.imageItems.count) images" + (session.otherFileCount > 0 ? " | \(session.otherFileCount) other files" : ""))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .padding(.trailing, 8)
@@ -1174,7 +1018,7 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     leftPanel
                         .frame(width: mainGeometry.size.width * 0.1)
-                    rightPanel
+                    PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
                 }
                 
                 // Full screen presentation is now handled via .onChange of session.fullScreenImageURL
@@ -1190,7 +1034,7 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .onChange(of: sidebarSelection) { oldURL, newURL in
             if let url = newURL {
-                loadFolder(url: url)
+                session.loadFolder(url: url, sidebarManager: sidebarManager)
             }
         }
         .onChange(of: session.fullScreenImageURL) { oldURL, newURL in
@@ -1199,7 +1043,7 @@ struct ContentView: View {
                     FullScreenImageView(url: url, onClose: {
                         session.fullScreenImageURL = nil
                     }, navigateImage: { direction in
-                        navigateFullScreen(direction: direction)
+                        session.navigateFullScreen(direction: direction)
                     })
                 }
             } else {
@@ -1207,7 +1051,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: session.activeItemURL) { oldURL, newURL in
-            updateMetadata(for: newURL)
+            session.updateMetadata(for: newURL)
         }
         .onOpenURL { url in
             let dir = url.deletingLastPathComponent()
@@ -1216,8 +1060,8 @@ struct ContentView: View {
             session.selectedItemURLs = [url]
             session.fullScreenImageURL = url
         }
-        .sheet(isPresented: $isShowingProperties) {
-            if let url = propertiesURL {
+        .sheet(isPresented: $session.isShowingProperties) {
+            if let url = session.propertiesURL {
                 PropertiesView(url: url)
             }
         }
@@ -1233,715 +1077,7 @@ struct ContentView: View {
         }
     }
     
-    private func copySelectedItemToClipboard() {
-        guard !session.selectedItemURLs.isEmpty else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects(session.selectedItemURLs.map { $0 as NSURL })
     }
-    
-    private func pasteFromClipboard() {
-        guard let targetFolder = session.currentFolderURL else { return }
-        let pasteboard = NSPasteboard.general
-        
-        var pastedSomething = false
-        
-        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
-            for sourceURL in urls where sourceURL.isFileURL {
-                let destinationURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
-                do {
-                    if !FileManager.default.fileExists(atPath: destinationURL.path) {
-                        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
-                        pastedSomething = true
-                    }
-                } catch {
-                    print("Error copying file: \(error)")
-                }
-            }
-        } else if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage], let firstImage = images.first {
-            if let tiff = firstImage.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let pngData = bitmap.representation(using: .png, properties: [:]) {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
-                let fileName = "Pasted Image \(formatter.string(from: Date())).png"
-                let destinationURL = targetFolder.appendingPathComponent(fileName)
-                do {
-                    try pngData.write(to: destinationURL)
-                    pastedSomething = true
-                } catch {
-                    print("Error saving image: \(error)")
-                }
-            }
-        }
-        
-        if pastedSomething {
-            loadFolder(url: targetFolder)
-        } else {
-            NSSound.beep() // Provide feedback if paste failed or was empty
-        }
-    }
-    
-    private func selectAllItems() {
-        session.selectedItemURLs = Set(session.folderContents.filter { !$0.isDirectory }.map { $0.url })
-    }
-    
-    private func deleteSelectedItem() {
-        var targets = session.selectedItemURLs
-        if let fsURL = session.fullScreenImageURL { targets.insert(fsURL) }
-        guard !targets.isEmpty else { return }
-        
-        let allItems = session.folderContents.filter { !$0.isDirectory }
-        
-        var nextURL: URL? = nil
-        if let targetURL = session.fullScreenImageURL ?? session.activeItemURL,
-           let index = allItems.firstIndex(where: { $0.url == targetURL }) {
-            // First, try to find the previous item that is not being deleted
-            for i in stride(from: index - 1, through: 0, by: -1) {
-                if !targets.contains(allItems[i].url) {
-                    nextURL = allItems[i].url
-                    break
-                }
-            }
-            // If no previous item found, try to find the next item
-            if nextURL == nil {
-                for i in stride(from: index + 1, to: allItems.count, by: 1) {
-                    if !targets.contains(allItems[i].url) {
-                        nextURL = allItems[i].url
-                        break
-                    }
-                }
-            }
-        }
-        
-        if nextURL == nil {
-            nextURL = allItems.first(where: { !targets.contains($0.url) })?.url
-        }
-        
-        do {
-            for url in targets {
-                do {
-                    try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-                } catch {
-                    try FileManager.default.removeItem(at: url)
-                }
-            }
-            session.folderContents.removeAll(where: { targets.contains($0.url) })
-            session.selectedItemURLs = []
-            if let next = nextURL {
-                session.selectedItemURLs = [next]
-                session.activeItemURL = next
-            } else {
-                session.activeItemURL = nil
-            }
-            if session.fullScreenImageURL != nil { session.fullScreenImageURL = nextURL }
-        } catch {
-            print("Error deleting file: \(error)")
-            NSSound.beep()
-        }
-    }
-    
-    private func moveItem(_ url: URL) {
-        var targets = session.selectedItemURLs
-        if !targets.contains(url) { targets.insert(url) }
-        
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Move"
-        panel.message = "Choose destination folder"
-        
-        if panel.runModal() == .OK, let destinationURL = panel.url {
-            let allItems = session.folderContents.filter { !$0.isDirectory }
-            let nextURL = allItems.first(where: { !targets.contains($0.url) })?.url
-            
-            do {
-                for tURL in targets {
-                    let finalURL = destinationURL.appendingPathComponent(tURL.lastPathComponent)
-                    try FileManager.default.moveItem(at: tURL, to: finalURL)
-                }
-                session.folderContents.removeAll(where: { targets.contains($0.url) })
-                session.selectedItemURLs = []
-                if let next = nextURL {
-                    session.selectedItemURLs = [next]
-                    session.activeItemURL = next
-                } else {
-                    session.activeItemURL = nil
-                }
-                if session.fullScreenImageURL != nil { session.fullScreenImageURL = nextURL }
-            } catch {
-                print("Error moving file: \(error)")
-                NSSound.beep()
-            }
-        }
-    }
-    
-    private func moveFiles(urls: [URL], to destinationDir: URL) {
-        let destAccessed = destinationDir.startAccessingSecurityScopedResource()
-        defer { if destAccessed { destinationDir.stopAccessingSecurityScopedResource() } }
-        
-        var successfullyMoved: Set<URL> = []
-        let fm = FileManager.default
-        
-        for sourceURL in urls {
-            let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
-            
-            let originalName = sourceURL.deletingPathExtension().lastPathComponent
-            let ext = sourceURL.pathExtension
-            var finalURL = destinationDir.appendingPathComponent(sourceURL.lastPathComponent)
-            
-            var counter = 1
-            while fm.fileExists(atPath: finalURL.path) {
-                let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
-                finalURL = destinationDir.appendingPathComponent(newName)
-                counter += 1
-            }
-            
-            do {
-                try fm.moveItem(at: sourceURL, to: finalURL)
-                successfullyMoved.insert(sourceURL)
-            } catch {
-                print("Error moving file \(sourceURL.lastPathComponent): \(error)")
-            }
-            
-            if sourceAccessed {
-                sourceURL.stopAccessingSecurityScopedResource()
-            }
-        }
-        
-        if !successfullyMoved.isEmpty {
-            DispatchQueue.main.async {
-                self.session.folderContents.removeAll(where: { successfullyMoved.contains($0.url) })
-                self.session.selectedItemURLs.subtract(successfullyMoved)
-            }
-        }
-    }
-    
-    private func saveBookmark(for url: URL) {
-        do {
-            let bookmarkData = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-            UserDefaults.standard.set(bookmarkData, forKey: "lastFolderBookmark")
-        } catch {
-            print("Failed to save bookmark: \(error)")
-        }
-    }
-    
-    private func restoreBookmark() -> URL? {
-        guard let data = UserDefaults.standard.data(forKey: "lastFolderBookmark") else { return nil }
-        var isStale = false
-        do {
-            let url = try URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale)
-            if isStale {
-                saveBookmark(for: url)
-            }
-            return url
-        } catch {
-            print("Failed to restore secure last folder bookmark: \(error)")
-            return nil
-        }
-    }
-    
-    private func updateMetadata(for url: URL?) {
-        guard let url = url else {
-            session.metadataString = ""
-            return
-        }
-        
-        var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-            session.metadataString = "Folder: \(url.lastPathComponent)"
-            return
-        }
-        
-        let name = url.lastPathComponent
-        var sizeStr = "Unknown Size"
-        if let attr = try? FileManager.default.attributesOfItem(atPath: url.path), let size = attr[.size] as? Int64 {
-            let formatter = ByteCountFormatter()
-            formatter.allowedUnits = [.useMB, .useKB, .useBytes]
-            formatter.countStyle = .file
-            sizeStr = formatter.string(fromByteCount: size)
-        }
-        
-        var dimensionsStr = ""
-        if let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
-           let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any] {
-            let width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
-            let height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
-            if width > 0 && height > 0 {
-                dimensionsStr = " - \(width) x \(height)"
-            }
-        }
-        
-        session.metadataString = "\(name)  |  \(sizeStr)\(dimensionsStr)"
-    }
-    
-    private func createNewFolder() {
-        guard let currentDir = session.currentFolderURL else { return }
-        
-        let alert = NSAlert()
-        alert.messageText = "Create New Folder"
-        alert.informativeText = "Enter a name for the new folder:"
-        alert.addButton(withTitle: "Create")
-        alert.addButton(withTitle: "Cancel")
-        
-        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
-        textField.stringValue = "New Folder"
-        alert.accessoryView = textField
-        
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            let folderName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !folderName.isEmpty else { return }
-            
-            let newURL = currentDir.appendingPathComponent(folderName)
-            do {
-                try FileManager.default.createDirectory(at: newURL, withIntermediateDirectories: true, attributes: nil)
-                loadFolder(url: currentDir) // Refresh the view
-            } catch {
-                print("Error creating folder: \(error)")
-                NSSound.beep()
-            }
-        }
-    }
-    
-    private func openWithKrita(_ url: URL) {
-        var targets = session.selectedItemURLs
-        if !targets.contains(url) {
-            targets.insert(url)
-        }
-        
-        for target in targets {
-            _ = target.startAccessingSecurityScopedResource()
-        }
-        
-        let kritaURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "org.kde.krita") 
-                       ?? URL(fileURLWithPath: "/Applications/Krita.app")
-                       
-        let config = NSWorkspace.OpenConfiguration()
-        NSWorkspace.shared.open(Array(targets), withApplicationAt: kritaURL, configuration: config) { _, error in
-            for target in targets {
-                target.stopAccessingSecurityScopedResource()
-            }
-            if let error = error {
-                print("Error opening with Krita: \(error)")
-            }
-        }
-    }
-    
-    private func openWithLightroom(_ url: URL) {
-        guard let favoritesURL = AppSettings.shared.favoritesURL else {
-            DispatchQueue.main.async {
-                let alert = NSAlert()
-                alert.messageText = "Favorites Folder Not Set"
-                alert.informativeText = "Please configure a Favorites folder in Settings to use Open with Lightroom."
-                alert.alertStyle = .warning
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
-            return
-        }
-        
-        let cr2URL = url.deletingPathExtension().appendingPathExtension("cr2")
-        var isStale = false
-        // Need to check if cr2 exists in the actual filesystem
-        let fileManager = FileManager.default
-        var cr2Exists = false
-        
-        let isAccessed = url.startAccessingSecurityScopedResource()
-        defer { if isAccessed { url.stopAccessingSecurityScopedResource() } }
-        
-        if fileManager.fileExists(atPath: cr2URL.path) {
-            cr2Exists = true
-        }
-        
-        guard cr2Exists else {
-            DispatchQueue.main.async {
-                let alert = NSAlert()
-                alert.messageText = "RAW File Not Found"
-                alert.informativeText = "Could not find a corresponding .cr2 file for \(url.lastPathComponent)."
-                alert.alertStyle = .warning
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
-            return
-        }
-        
-        let isFavoritesAccessed = favoritesURL.startAccessingSecurityScopedResource()
-        defer { if isFavoritesAccessed { favoritesURL.stopAccessingSecurityScopedResource() } }
-        
-        let tempDirURL = favoritesURL.appendingPathComponent("LightroomTemp")
-        do {
-            if !fileManager.fileExists(atPath: tempDirURL.path) {
-                try fileManager.createDirectory(at: tempDirURL, withIntermediateDirectories: true, attributes: nil)
-            } else {
-                let contents = try fileManager.contentsOfDirectory(at: tempDirURL, includingPropertiesForKeys: nil)
-                for fileURL in contents {
-                    try fileManager.removeItem(at: fileURL)
-                }
-            }
-            
-            let uniqueString = UUID().uuidString.prefix(6)
-            let uniqueName = "\(cr2URL.deletingPathExtension().lastPathComponent)_\(uniqueString).cr2"
-            let destURL = tempDirURL.appendingPathComponent(uniqueName)
-            try fileManager.copyItem(at: cr2URL, to: destURL)
-            
-            let now = Date()
-            try fileManager.setAttributes([.creationDate: now, .modificationDate: now], ofItemAtPath: destURL.path)
-            
-            let lightroomURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.adobe.LightroomClassicCC7") 
-                           ?? URL(fileURLWithPath: "/Applications/Adobe Lightroom Classic/Adobe Lightroom Classic.app")
-            
-            let config = NSWorkspace.OpenConfiguration()
-            NSWorkspace.shared.open([destURL], withApplicationAt: lightroomURL, configuration: config) { _, error in
-                if let error = error {
-                    print("Error opening with Lightroom: \(error)")
-                }
-            }
-        } catch {
-            DispatchQueue.main.async {
-                let alert = NSAlert()
-                alert.messageText = "Error"
-                alert.informativeText = "An error occurred while preparing the file for Lightroom: \(error.localizedDescription)"
-                alert.alertStyle = .critical
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
-        }
-    }
-    
-    private func promptSingleRename(for url: URL) {
-        let baseName = url.deletingPathExtension().lastPathComponent
-        let alert = NSAlert()
-        alert.messageText = "Rename File"
-        alert.informativeText = "Enter a new name (extension will be preserved):"
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-        
-        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
-        textField.stringValue = baseName
-        alert.accessoryView = textField
-        
-        if alert.runModal() == .alertFirstButtonReturn {
-            let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !newName.isEmpty && newName != baseName {
-                executeSingleRename(originalURL: url, newBaseName: newName)
-            }
-        }
-    }
-
-    private func promptBulkRename() {
-        let alert = NSAlert()
-        alert.messageText = session.selectedItemURLs.count > 1 ? "Batch Rename \(session.selectedItemURLs.count) Files" : "Batch Rename All Files"
-        alert.informativeText = "Enter base name for files:"
-        alert.addButton(withTitle: session.selectedItemURLs.count > 1 ? "Rename" : "Rename All")
-        alert.addButton(withTitle: "Cancel")
-        
-        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
-        alert.accessoryView = textField
-        
-        if alert.runModal() == .alertFirstButtonReturn {
-            let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !newName.isEmpty {
-                executeBulkRename(baseName: newName)
-            }
-        }
-    }
-
-    private func executeSingleRename(originalURL: URL, newBaseName: String) {
-        let directory = originalURL.deletingLastPathComponent()
-        let ext = originalURL.pathExtension
-        let newURL = ext.isEmpty ? directory.appendingPathComponent(newBaseName) : directory.appendingPathComponent("\(newBaseName).\(ext)")
-        
-        Task { await processRenames(moves: [(originalURL, newURL)]) }
-    }
-
-    private func executeBulkRename(baseName: String) {
-        guard let dir = session.currentFolderURL else { return }
-        
-        let filesToRename: [FileItem]
-        if session.selectedItemURLs.count > 1 {
-            filesToRename = session.folderContents.filter { session.selectedItemURLs.contains($0.url) && !$0.isDirectory }
-        } else {
-            filesToRename = session.folderContents.filter { !$0.isDirectory }
-        }
-        
-
-        var moves: [(URL, URL)] = []
-        for (index, file) in filesToRename.enumerated() {
-            let originalURL = file.url
-            let ext = originalURL.pathExtension
-            let sequenceStr = String(format: "%05d", index + 1)
-            let newFileName = ext.isEmpty ? "\(baseName)_\(sequenceStr)" : "\(baseName)_\(sequenceStr).\(ext)"
-            let newURL = dir.appendingPathComponent(newFileName)
-            moves.append((originalURL, newURL))
-        }
-        
-        let logStr = moves.map { "\($0.0.lastPathComponent) -> \($0.1.lastPathComponent)" }.joined(separator: "\n")
-        try? logStr.write(toFile: "/tmp/rename_log.txt", atomically: true, encoding: .utf8)
-        Task { await processRenames(moves: moves) }
-    }
-
-    @MainActor
-    private func processRenames(moves: [(URL, URL)]) async {
-        let parentFolder = session.currentFolderURL
-        let parentAccessed = parentFolder?.startAccessingSecurityScopedResource() ?? false
-        
-        // Phase 1: Rename to temporary names to avoid intra-batch collisions
-        var tempMoves: [(URL, URL)] = []
-        for (source, destination) in moves {
-            if source == destination { continue }
-            
-            let itemAccessed = source.startAccessingSecurityScopedResource()
-            let tempName = UUID().uuidString + "_" + source.lastPathComponent
-            let tempURL = source.deletingLastPathComponent().appendingPathComponent(tempName)
-            
-            do {
-                try FileManager.default.moveItem(at: source, to: tempURL)
-                tempMoves.append((tempURL, destination))
-            } catch {
-                print("Error creating temp file for \(source.lastPathComponent): \(error)")
-            }
-            
-            if itemAccessed {
-                source.stopAccessingSecurityScopedResource()
-            }
-        }
-        
-        // Phase 2: Rename to final names
-        for (tempURL, destination) in tempMoves {
-            do {
-                if FileManager.default.fileExists(atPath: destination.path) {
-                    print("File already exists at destination: \(destination.path)")
-                    continue
-                }
-                try FileManager.default.moveItem(at: tempURL, to: destination)
-            } catch {
-                print("Error renaming temp file to \(destination.lastPathComponent): \(error)")
-            }
-        }
-        
-        if parentAccessed {
-            parentFolder?.stopAccessingSecurityScopedResource()
-        }
-        
-        if let url = session.currentFolderURL {
-            self.loadFolder(url: url)
-        }
-    }
-    
-    private func handleUpArrow() {
-        if session.fullScreenImageURL == nil {
-            navigateGridRow(direction: -1)
-        }
-    }
-    
-    private func handleDownArrow() {
-        if session.fullScreenImageURL == nil {
-            navigateGridRow(direction: 1)
-        }
-    }
-    
-    private func handleLeftArrow() {
-        if session.fullScreenImageURL != nil {
-            navigateFullScreen(direction: -1)
-        } else {
-            navigateGrid(direction: -1)
-        }
-    }
-    
-    private func handleRightArrow() {
-        if session.fullScreenImageURL != nil {
-            navigateFullScreen(direction: 1)
-        } else {
-            navigateGrid(direction: 1)
-        }
-    }
-    
-    private func navigateGridRow(direction: Int) {
-        guard !session.folderContents.isEmpty else { return }
-        guard let currentSelected = session.activeItemURL, let currentIndex = session.folderContents.firstIndex(where: { $0.url == currentSelected }) else {
-            if let url = session.folderContents.first?.url {
-                session.activeItemURL = url
-                session.selectedItemURLs = [url]
-            }
-            return
-        }
-        let newIndex = currentIndex + (direction * currentColumnCount)
-        if newIndex >= 0 && newIndex < session.folderContents.count {
-            session.activeItemURL = session.folderContents[newIndex].url; session.selectedItemURLs = [session.folderContents[newIndex].url]
-        } else if newIndex < 0 {
-            if let u = session.folderContents.first?.url { session.activeItemURL = u; session.selectedItemURLs = [u] }
-        } else if newIndex >= session.folderContents.count {
-            if let u = session.folderContents.last?.url { session.activeItemURL = u; session.selectedItemURLs = [u] }
-        }
-    }
-    
-    private func navigateGrid(direction: Int) {
-        guard !session.folderContents.isEmpty else { return }
-        guard let currentSelected = session.activeItemURL, let currentIndex = session.folderContents.firstIndex(where: { $0.url == currentSelected }) else {
-            if let url = session.folderContents.first?.url {
-                session.activeItemURL = url
-                session.selectedItemURLs = [url]
-            }
-            return
-        }
-        let newIndex = currentIndex + direction
-        if newIndex >= 0 && newIndex < session.folderContents.count {
-            session.activeItemURL = session.folderContents[newIndex].url; session.selectedItemURLs = [session.folderContents[newIndex].url]
-        }
-    }
-    
-    private func navigateFullScreen(direction: Int) {
-        guard let currentURL = session.fullScreenImageURL else { return }
-        let images = imageItems
-        guard let currentIndex = images.firstIndex(where: { $0.url == currentURL }) else { return }
-        
-        let newIndex = currentIndex + direction
-        if newIndex >= 0 && newIndex < images.count {
-            let newURL = images[newIndex].url
-            session.fullScreenImageURL = newURL
-            session.activeItemURL = newURL
-            session.selectedItemURLs = [newURL]
-        }
-    }
-    
-    private func handleEnter() {
-        guard session.fullScreenImageURL == nil else { return }
-        guard let selected = session.activeItemURL else { return }
-        
-        if let item = session.folderContents.first(where: { $0.url == selected }) {
-            if item.isDirectory {
-                sidebarSelection = nil
-                loadFolder(url: item.url)
-            } else {
-                session.fullScreenImageURL = item.url
-            }
-        }
-    }
-    
-    private func navigateUp() {
-        guard let current = session.currentFolderURL else { return }
-        let parentURL = current.deletingLastPathComponent()
-        
-        sidebarSelection = nil
-        loadFolder(url: parentURL)
-    }
-    
-    private func sortItems(_ items: [FileItem]) -> [FileItem] {
-        return items.sorted {
-            if $0.isDirectory && !$1.isDirectory { return true }
-            if !$0.isDirectory && $1.isDirectory { return false }
-            
-            switch session.currentSortOrder {
-            case .name:
-                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
-            case .date:
-                return $0.creationDate > $1.creationDate
-            case .size:
-                return $0.fileSize > $1.fileSize
-            }
-        }
-    }
-    
-    private func loadFolder(url: URL) {
-        sidebarManager.recordRecentVisit(url: url)
-        if let current = session.currentFolderURL, let active = session.activeItemURL {
-            folderHistory[current] = active
-        }
-        
-        session.currentFolderURL = url
-        session.folderContents = []
-        session.otherFileCount = 0
-        
-        if let savedActive = folderHistory[url] {
-            session.activeItemURL = savedActive
-            session.selectedItemURLs = [savedActive]
-        } else {
-            session.activeItemURL = nil
-            session.selectedItemURLs = []
-        }
-        
-        var isLocalFolder = true
-        if let resourceValues = try? url.resourceValues(forKeys: [.volumeIsLocalKey]),
-           let local = resourceValues.volumeIsLocal {
-            isLocalFolder = local
-        }
-        ThumbnailLoader.shared.maxTasks = isLocalFolder ? 8 : 2
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else {
-                return
-            }
-            
-            var batch: [FileItem] = []
-            var allItems: [FileItem] = []
-            let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "webp"]
-            var otherCountLocal = 0
-            
-            for case let fileURL as URL in enumerator {
-                var isDirectory = false
-                var fileDate = Date.distantPast
-                var fileSize: Int64 = 0
-                var isLocal = true
-                
-                if let resourceValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey]) {
-                    isDirectory = resourceValues.isDirectory ?? false
-                    fileDate = resourceValues.creationDate ?? Date.distantPast
-                    fileSize = Int64(resourceValues.fileSize ?? 0)
-                    isLocal = resourceValues.volumeIsLocal ?? true
-                }
-                
-                let fileName = fileURL.lastPathComponent
-                
-                if !isDirectory {
-                    let ext = fileURL.pathExtension.lowercased()
-                    if imageExtensions.contains(ext) {
-                        batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
-                    } else {
-                        otherCountLocal += 1
-                    }
-                } else {
-                    batch.append(FileItem(url: fileURL, name: fileName, isDirectory: true, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
-                }
-                
-                if batch.count >= 100 {
-                    allItems.append(contentsOf: batch)
-                    batch.removeAll(keepingCapacity: true)
-                    
-                    let currentItems = allItems // Unsorted preview
-                    
-                    DispatchQueue.main.async {
-                        guard self.session.currentFolderURL == url else { return }
-                        self.session.folderContents = currentItems
-                        self.session.otherFileCount = otherCountLocal
-                        if self.session.activeItemURL == nil {
-                            if let u = currentItems.first?.url { self.session.activeItemURL = u; self.session.selectedItemURLs = [u] }
-                        }
-                    }
-                }
-            }
-            
-            allItems.append(contentsOf: batch)
-            if !allItems.isEmpty {
-                let sortedItems = self.sortItems(allItems)
-                
-                DispatchQueue.main.async {
-                    guard self.session.currentFolderURL == url else { return }
-                    self.session.folderContents = sortedItems
-                    self.session.otherFileCount = otherCountLocal
-                    if self.session.activeItemURL == nil {
-                        if let u = sortedItems.first?.url { self.session.activeItemURL = u; self.session.selectedItemURLs = [u] }
-                    }
-                }
-            } else {
-                DispatchQueue.main.async {
-                    guard self.session.currentFolderURL == url else { return }
-                    self.session.folderContents = []
-                    self.session.otherFileCount = otherCountLocal
-                }
-            }
-        }
-    }
-}
 
 #Preview {
     ContentView()
