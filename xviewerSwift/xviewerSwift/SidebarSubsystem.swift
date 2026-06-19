@@ -177,6 +177,8 @@ struct SidebarNavigationView: View {
     @Binding var selectedFolderURL: URL?
     var performDropAction: ((URL) -> Void)?
     
+    @State private var isShowingSettings = false
+    
     var body: some View {
         List(selection: $selectedFolderURL) {
             
@@ -212,6 +214,25 @@ struct SidebarNavigationView: View {
             }
         }
         .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Button(action: {
+                    isShowingSettings = true
+                }) {
+                    Image(systemName: "gearshape")
+                        .foregroundColor(.secondary)
+                        .imageScale(.large)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .padding()
+                
+                Spacer()
+            }
+            .background(Color(NSColor.windowBackgroundColor))
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            SettingsView()
+        }
     }
 }
 

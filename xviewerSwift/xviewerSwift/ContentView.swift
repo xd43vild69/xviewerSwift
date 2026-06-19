@@ -289,6 +289,7 @@ struct FullScreenImageView: View {
     @State private var rotationAngle: Double = 0.0
     @StateObject private var zoomState = ZoomState()
     @State private var showUI: Bool = true
+    @State private var notificationMessage: String? = nil
     
     var body: some View {
         ZStack {
@@ -446,6 +447,28 @@ struct FullScreenImageView: View {
             Button(action: { isBlackAndWhite.toggle() }) { Text("") }
                 .keyboardShortcut("b", modifiers: [.command])
                 .opacity(0)
+                
+            Button(action: { copyToFavorites() }) { Text("") }
+                .keyboardShortcut("m", modifiers: [.command])
+                .opacity(0)
+                
+            if let message = notificationMessage {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Text(message)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.75))
+                            .cornerRadius(8)
+                            .padding()
+                            .transition(.opacity)
+                    }
+                }
+            }
         }
         .zIndex(1)
         .onAppear { loadImage(from: url) }
@@ -462,6 +485,80 @@ struct FullScreenImageView: View {
             if let img = NSImage(contentsOf: url) {
                 DispatchQueue.main.async {
                     self.nsImage = img
+                }
+            }
+        }
+    }
+    
+    private func copyToFavorites() {
+        guard let favoritesURL = AppSettings.shared.favoritesURL else {
+            showNotification("⚠️ Primero configura la ruta de Favoritos en la configuración")
+            NSSound.beep()
+            return
+        }
+        
+        let destAccessed = favoritesURL.startAccessingSecurityScopedResource()
+        defer { if destAccessed { favoritesURL.stopAccessingSecurityScopedResource() } }
+        
+        let sourceAccessed = url.startAccessingSecurityScopedResource()
+        defer { if sourceAccessed { url.stopAccessingSecurityScopedResource() } }
+        
+        let fm = FileManager.default
+        let originalName = url.deletingPathExtension().lastPathComponent
+        let ext = url.pathExtension
+        
+        var finalURL = favoritesURL.appendingPathComponent(url.lastPathComponent)
+        var counter = 1
+        var suffix = ""
+        while fm.fileExists(atPath: finalURL.path) {
+            suffix = "_\(counter)"
+            let newName = ext.isEmpty ? "\(originalName)\(suffix)" : "\(originalName)\(suffix).\(ext)"
+            finalURL = favoritesURL.appendingPathComponent(newName)
+            counter += 1
+        }
+        
+        // Check for associated RAW file
+        var rawSourceURL: URL? = nil
+        let possibleRawExtensions = ["cr2", "CR2", "raw", "RAW", "nef", "NEF", "arw", "ARW"]
+        for rawExt in possibleRawExtensions {
+            let tempRawURL = url.deletingPathExtension().appendingPathExtension(rawExt)
+            if fm.fileExists(atPath: tempRawURL.path) {
+                rawSourceURL = tempRawURL
+                break
+            }
+        }
+        
+        var finalRawURL: URL? = nil
+        if let rawSrc = rawSourceURL {
+            let rawExt = rawSrc.pathExtension
+            let newRawName = "\(originalName)\(suffix).\(rawExt)"
+            finalRawURL = favoritesURL.appendingPathComponent(newRawName)
+        }
+        
+        do {
+            try fm.copyItem(at: url, to: finalURL)
+            if let rawSrc = rawSourceURL, let rawDest = finalRawURL {
+                try fm.copyItem(at: rawSrc, to: rawDest)
+                showNotification("✅ Copiado a Favoritos (+ RAW)")
+            } else {
+                showNotification("✅ Copiado a Favoritos")
+            }
+        } catch {
+            print("Error copying to favorites: \(error)")
+            showNotification("❌ Error al copiar")
+            NSSound.beep()
+        }
+    }
+    
+    private func showNotification(_ message: String) {
+        withAnimation {
+            notificationMessage = message
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation {
+                if notificationMessage == message {
+                    notificationMessage = nil
                 }
             }
         }
