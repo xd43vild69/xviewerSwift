@@ -1282,7 +1282,10 @@ struct ContentView: View {
         
         let newIndex = currentIndex + direction
         if newIndex >= 0 && newIndex < images.count {
-            fullScreenImageURL = images[newIndex].url
+            let newURL = images[newIndex].url
+            fullScreenImageURL = newURL
+            activeItemURL = newURL
+            selectedItemURLs = [newURL]
         }
     }
     
