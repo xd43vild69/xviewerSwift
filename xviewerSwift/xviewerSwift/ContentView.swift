@@ -854,6 +854,12 @@ enum GridScrollOffset {
     static var contentMinY: CGFloat = 0
 }
 
+
+enum ActivePane {
+    case left
+    case right
+}
+
 struct ContentView: View {
     @StateObject private var sidebarManager = SidebarManager()
     @State private var isShowingFolderPicker = false
@@ -862,6 +868,7 @@ struct ContentView: View {
     @StateObject private var session = BrowserSession()
     @StateObject private var sessionRight = BrowserSession()
     @State private var isSplitViewEnabled = false
+    @State private var activePane: ActivePane = .left
     @State private var currentColumnCount: Int = 1
 
     private var leftPanel: some View {
@@ -893,65 +900,73 @@ struct ContentView: View {
     
     
 
+    
+    private func activeSession() -> BrowserSession {
+        if isSplitViewEnabled && activePane == .right {
+            return sessionRight
+        }
+        return session
+    }
+
     private var shortcutsGroup: some View {
         Group {
-            Button(action: { session.navigateUp() }) { Text("") }
+            Button(action: { activeSession().navigateUp() }) { Text("") }
                 .keyboardShortcut(.upArrow, modifiers: [.command])
                 .opacity(0)
                 
-            Button(action: { session.handleUpArrow() }) { Text("") }
+            Button(action: { activeSession().handleUpArrow() }) { Text("") }
                 .keyboardShortcut(.upArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { session.handleDownArrow() }) { Text("") }
+            Button(action: { activeSession().handleDownArrow() }) { Text("") }
                 .keyboardShortcut(.downArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { session.handleLeftArrow() }) { Text("") }
+            Button(action: { activeSession().handleLeftArrow() }) { Text("") }
                 .keyboardShortcut(.leftArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { session.handleRightArrow() }) { Text("") }
+            Button(action: { activeSession().handleRightArrow() }) { Text("") }
                 .keyboardShortcut(.rightArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { session.handleEnter() }) { Text("") }
+            Button(action: { activeSession().handleEnter() }) { Text("") }
                 .keyboardShortcut(.space, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { session.handleEnter() }) { Text("") }
+            Button(action: { activeSession().handleEnter() }) { Text("") }
                 .keyboardShortcut(.return, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { session.handleEnter() }) { Text("") }
+            Button(action: { activeSession().handleEnter() }) { Text("") }
                 .keyboardShortcut(.downArrow, modifiers: [.command])
                 .opacity(0)
                 
-            Button(action: { session.copySelectedItemToClipboard() }) { Text("") }
+            Button(action: { activeSession().copySelectedItemToClipboard() }) { Text("") }
                 .keyboardShortcut("c", modifiers: [.command])
                 .opacity(0)
                 
-            Button(action: { session.pasteFromClipboard() }) { Text("") }
+            Button(action: { activeSession().pasteFromClipboard() }) { Text("") }
                 .keyboardShortcut("v", modifiers: [.command])
                 .opacity(0)
                 
-            Button(action: { session.deleteSelectedItem() }) { Text("") }
+            Button(action: { activeSession().deleteSelectedItem() }) { Text("") }
                 .keyboardShortcut(KeyEquivalent("\u{7F}"), modifiers: []) // Backspace
                 .opacity(0)
                 
-            Button(action: { session.deleteSelectedItem() }) { Text("") }
+            Button(action: { activeSession().deleteSelectedItem() }) { Text("") }
                 .keyboardShortcut(KeyEquivalent("\u{7F}"), modifiers: [.command]) // Cmd + Backspace
                 .opacity(0)
                 
-            Button(action: { session.deleteSelectedItem() }) { Text("") }
+            Button(action: { activeSession().deleteSelectedItem() }) { Text("") }
                 .keyboardShortcut(.delete, modifiers: []) // Forward Delete
                 .opacity(0)
                 
-            Button(action: { session.deleteSelectedItem() }) { Text("") }
+            Button(action: { activeSession().deleteSelectedItem() }) { Text("") }
                 .keyboardShortcut(.delete, modifiers: [.command]) // Cmd + Forward Delete
                 .opacity(0)
                 
-            Button(action: { session.selectAllItems() }) { Text("") }
+            Button(action: { activeSession().selectAllItems() }) { Text("") }
                 .keyboardShortcut("a", modifiers: [.command])
                 .opacity(0)
         }
@@ -1026,8 +1041,10 @@ struct ContentView: View {
                         HSplitView {
                             PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
                                 .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
+                                .simultaneousGesture(TapGesture().onEnded { activePane = .left })
                             PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelectionRight, session: sessionRight)
                                 .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
+                                .simultaneousGesture(TapGesture().onEnded { activePane = .right })
                         }
                     } else {
                         PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
@@ -1084,6 +1101,9 @@ struct ContentView: View {
                 Button(action: {
                     withAnimation {
                         isSplitViewEnabled.toggle()
+                        if isSplitViewEnabled, let currentURL = session.currentFolderURL {
+                            sessionRight.loadFolder(url: currentURL, sidebarManager: sidebarManager)
+                        }
                     }
                 }) {
                     Label("Split View", systemImage: isSplitViewEnabled ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
