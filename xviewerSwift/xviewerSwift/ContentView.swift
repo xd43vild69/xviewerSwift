@@ -776,7 +776,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Divider()
             HStack {
-                if let url = activeItemURL {
+                if let url = activeItemURL ?? currentFolderURL {
                     Text(url.path)
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)

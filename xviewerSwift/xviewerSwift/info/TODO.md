@@ -1,8 +1,8 @@
 🔴 
 
-- si no selecciono nada, la ruta abajo en el statusbar debe ser la del directorio actual
 
-- cuando retorno de una carpeta hija a una padre, el sistema debe recordar cual fue desde que directorio fue el ultimo que se posiciono la seleccion y volver al mismo origen, pensarlo de manera recursiva para tener un mapa de navegacion mas amigable
+
+- en la navegacion entre carpetas, cuando retorno de una carpeta hija a una padre, el sistema debe recordar cual fue la ultima posicion desde que entro, y volver a la misma posicion, pensarlo de manera recursiva para tener un mapa de navegacion mas amigable siempre
 
 - cuando estoy en modo full screen y navego entre imagenes, el aplicativo debe en el fondo tambien moviendo la seleccion en la que se encuentra y si retorno al modo normal, la imagen seleccionada debe ser la misma en la que estaba en modo full screen 
 
@@ -27,18 +27,12 @@ Estas son funciones básicas que los usuarios esperan de forma casi obligatoria 
 2. **Navegación entre Carpetas (Adelante / Atrás):** Si haces doble clic en una subcarpeta, deberías entrar en ella. Además, necesitamos un botón o atajo (`Cmd + Flecha Arriba`) para regresar al directorio padre o navegar por el historial.
 3. **Soporte de Arrastrar y Soltar (Drag & Drop):** Poder seleccionar archivos en nuestra app y arrastrarlos hacia el Finder o hacia Photoshop/Krita, y viceversa (soltar archivos del escritorio hacia nuestra app).
 
-### 🟡 Media Prioridad (Productividad y Organización)
-Estas funciones mejoran drásticamente el flujo de trabajo y la velocidad:
+
 
 4. **Deshacer (Undo):** Implementar el clásico `Cmd + Z`. Si borraste una imagen o la moviste por accidente, poder revertir esa acción de forma inmediata.
-5. **Barra de Búsqueda y Filtros:** Un pequeño cuadro de texto para filtrar rápidamente los archivos de la carpeta actual por su nombre (ej. buscar "logo") o por extensión (ej. "*.png").
-6. **Barra Lateral de Accesos Directos:** Actualmente nuestro panel izquierdo solo muestra el nombre de la carpeta. Sería ideal poder anclar ahí tus carpetas favoritas (Descargas, Escritorio, Proyectos) para saltar entre ellas rápidamente.
+
 7. **Refresco Automático:** Si otra aplicación o el Finder crea o elimina un archivo en la carpeta que estás viendo, nuestra app debería detectarlo y actualizarse automáticamente sin tener que recargar la carpeta de forma manual.
 
-### 🟢 Baja Prioridad (Avanzadas y para Usuarios Pro)
-Funciones de "nicho", muy potentes, pero que dependen del tipo de usuario al que va dirigida la app:
 
-8. **Panel de Información y EXIF:** Al presionar `Cmd + I` (o tener un panel lateral derecho), ver detalles avanzados de la fotografía: con qué cámara se tomó, el ISO, la apertura, dimensiones exactas y ubicación en el mapa.
-9. **Acciones en Lote (Bulk Actions):** Seleccionar 50 imágenes y poder cambiarles el tamaño a todas al mismo tiempo, convertirlas a `.jpg` o renombrarlas masivamente (ej. "Viaje_01", "Viaje_02"...).
 
 
