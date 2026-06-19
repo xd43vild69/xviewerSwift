@@ -243,6 +243,7 @@ struct FullScreenImageView: View {
     @State private var isInverted = false
     @State private var rotationAngle: Double = 0.0
     @StateObject private var zoomState = ZoomState()
+    @State private var showUI: Bool = true
     
     var body: some View {
         ZStack {
@@ -309,26 +310,50 @@ struct FullScreenImageView: View {
                     .controlSize(.large)
             }
             
-            VStack {
-                HStack {
-                    Spacer()
-                    Button(action: { 
-                        if rotationAngle != 0.0 {
-                            withAnimation(nil) { rotationAngle = 0.0 }
-                        } else {
-                            onClose() 
+            if showUI {
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button(action: { 
+                            if rotationAngle != 0.0 {
+                                withAnimation(nil) { rotationAngle = 0.0 }
+                            } else {
+                                onClose() 
+                            }
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.largeTitle)
+                                .foregroundColor(.white)
+                                .padding()
                         }
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.largeTitle)
-                            .foregroundColor(.white)
-                            .padding()
+                        .buttonStyle(PlainButtonStyle())
+                        .keyboardShortcut(.escape, modifiers: [])
                     }
-                    .buttonStyle(PlainButtonStyle())
-                    .keyboardShortcut(.escape, modifiers: [])
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        if let image = nsImage {
+                            Text("\(Int(image.size.width)) × \(Int(image.size.height))")
+                                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.black.opacity(0.6))
+                                .cornerRadius(8)
+                                .padding()
+                        }
+                    }
                 }
-                Spacer()
+            } else {
+                // Invisible button to capture Escape when UI is hidden
+                Button(action: { onClose() }) { Text("") }
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .opacity(0)
             }
+            
+            Button(action: { showUI.toggle() }) { Text("") }
+                .keyboardShortcut(KeyEquivalent("\t"), modifiers: [])
+                .opacity(0)
             
             Button(action: { navigateImage(-1) }) { Text("") }
                 .keyboardShortcut(.leftArrow, modifiers: [])
