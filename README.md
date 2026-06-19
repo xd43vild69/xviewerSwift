@@ -20,6 +20,11 @@
 - **Create & Move:** Create new folders and move items using standard system dialogs.
 - **Clipboard Support:** Copy (`Cmd + C`) and Paste (`Cmd + V`) selected items smoothly across directories.
 
+### 🪟 Dual Pane (Split View)
+- **Side-by-Side Browsing:** Press `Cmd + S` or use the toolbar button to activate a dual-pane layout for simultaneous, independent browsing of two folders.
+- **Quick Transfer:** Move files instantly between the active and inactive pane using `Option + Left/Right Arrow` shortcuts. The destination pane refreshes automatically.
+- **Smart Focus:** Click anywhere or press `Tab` to seamlessly switch focus between the left and right panels.
+
 ### 🧭 Navigation & Organization
 - **Smart Sidebar:**
   - **Sources:** Quick access to standard directories like Home, Downloads, and Pictures.
@@ -33,6 +38,7 @@
 
 ### 🎨 External Integration
 - **Open with Krita:** Dedicated integration to send images directly to the Krita digital painting application for advanced editing.
+- **Open with Lightroom:** Right-click an image to send its corresponding RAW file directly to Adobe Lightroom for professional color grading. Automatically handles temporary workspace staging.
 
 ## Requirements
 - macOS 13.0+ (Ventura) or later.

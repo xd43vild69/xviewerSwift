@@ -1157,6 +1157,24 @@ struct ContentView: View {
         .onChange(of: session.activeItemURL) { oldURL, newURL in
             session.updateMetadata(for: newURL)
         }
+        .onChange(of: sessionRight.fullScreenImageURL) { oldURL, newURL in
+            if let url = newURL {
+                ImmersiveWindowController.shared.show {
+                    FullScreenImageView(url: url, onClose: {
+                        sessionRight.fullScreenImageURL = nil
+                    }, navigateImage: { direction in
+                        sessionRight.navigateFullScreen(direction: direction)
+                    })
+                }
+            } else {
+                if session.fullScreenImageURL == nil {
+                    ImmersiveWindowController.shared.hide()
+                }
+            }
+        }
+        .onChange(of: sessionRight.activeItemURL) { oldURL, newURL in
+            sessionRight.updateMetadata(for: newURL)
+        }
         .onOpenURL { url in
             let dir = url.deletingLastPathComponent()
             sidebarSelection = dir
