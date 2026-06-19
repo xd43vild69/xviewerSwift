@@ -729,6 +729,7 @@ struct GridItemCell: View {
     let moveItemAction: (URL) -> Void
     let createNewFolderAction: () -> Void
     let openWithKritaAction: (URL) -> Void
+    let openWithLightroomAction: (URL) -> Void
     let renameItemAction: (URL) -> Void
     let showPropertiesAction: (URL) -> Void
     let isBookmarked: Bool
@@ -814,6 +815,9 @@ struct GridItemCell: View {
                 Divider()
                 Button { openWithKritaAction(item.url) } label: {
                     Label("Open with Krita", systemImage: "paintpalette")
+                }
+                Button { openWithLightroomAction(item.url) } label: {
+                    Label("Open with Lightroom", systemImage: "camera.aperture")
                 }
             }
             Divider()
@@ -928,6 +932,9 @@ struct ContentView: View {
                                 },
                                 openWithKritaAction: { url in
                                     openWithKrita(url)
+                                },
+                                openWithLightroomAction: { url in
+                                    openWithLightroom(url)
                                 },
                                 renameItemAction: { url in
                                     if selectedItemURLs.count > 1 && selectedItemURLs.contains(url) {
@@ -1511,6 +1518,87 @@ struct ContentView: View {
             }
             if let error = error {
                 print("Error opening with Krita: \(error)")
+            }
+        }
+    }
+    
+    private func openWithLightroom(_ url: URL) {
+        guard let favoritesURL = AppSettings.shared.favoritesURL else {
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Favorites Folder Not Set"
+                alert.informativeText = "Please configure a Favorites folder in Settings to use Open with Lightroom."
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+            return
+        }
+        
+        let cr2URL = url.deletingPathExtension().appendingPathExtension("cr2")
+        var isStale = false
+        // Need to check if cr2 exists in the actual filesystem
+        let fileManager = FileManager.default
+        var cr2Exists = false
+        
+        let isAccessed = url.startAccessingSecurityScopedResource()
+        defer { if isAccessed { url.stopAccessingSecurityScopedResource() } }
+        
+        if fileManager.fileExists(atPath: cr2URL.path) {
+            cr2Exists = true
+        }
+        
+        guard cr2Exists else {
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "RAW File Not Found"
+                alert.informativeText = "Could not find a corresponding .cr2 file for \(url.lastPathComponent)."
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+            return
+        }
+        
+        let isFavoritesAccessed = favoritesURL.startAccessingSecurityScopedResource()
+        defer { if isFavoritesAccessed { favoritesURL.stopAccessingSecurityScopedResource() } }
+        
+        let tempDirURL = favoritesURL.appendingPathComponent("LightroomTemp")
+        do {
+            if !fileManager.fileExists(atPath: tempDirURL.path) {
+                try fileManager.createDirectory(at: tempDirURL, withIntermediateDirectories: true, attributes: nil)
+            } else {
+                let contents = try fileManager.contentsOfDirectory(at: tempDirURL, includingPropertiesForKeys: nil)
+                for fileURL in contents {
+                    try fileManager.removeItem(at: fileURL)
+                }
+            }
+            
+            let uniqueString = UUID().uuidString.prefix(6)
+            let uniqueName = "\(cr2URL.deletingPathExtension().lastPathComponent)_\(uniqueString).cr2"
+            let destURL = tempDirURL.appendingPathComponent(uniqueName)
+            try fileManager.copyItem(at: cr2URL, to: destURL)
+            
+            let now = Date()
+            try fileManager.setAttributes([.creationDate: now, .modificationDate: now], ofItemAtPath: destURL.path)
+            
+            let lightroomURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.adobe.LightroomClassicCC7") 
+                           ?? URL(fileURLWithPath: "/Applications/Adobe Lightroom Classic/Adobe Lightroom Classic.app")
+            
+            let config = NSWorkspace.OpenConfiguration()
+            NSWorkspace.shared.open([destURL], withApplicationAt: lightroomURL, configuration: config) { _, error in
+                if let error = error {
+                    print("Error opening with Lightroom: \(error)")
+                }
+            }
+        } catch {
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Error"
+                alert.informativeText = "An error occurred while preparing the file for Lightroom: \(error.localizedDescription)"
+                alert.alertStyle = .critical
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
             }
         }
     }
