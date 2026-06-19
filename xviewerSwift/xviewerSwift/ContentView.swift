@@ -532,6 +532,7 @@ struct ContentView: View {
     @State private var isShowingBulkRenameAlert = false
     @State private var bulkRenameBaseName: String = ""
     @State private var showCopiedFeedback: Bool = false
+    @State private var folderHistory: [URL: URL] = [:]
 
     private var imageItems: [FileItem] {
         folderContents.filter { !$0.isDirectory }
@@ -666,6 +667,13 @@ struct ContentView: View {
                 .onChange(of: activeItemURL) { oldURL, newURL in
                     if let url = newURL {
                         proxy.scrollTo(url)
+                    }
+                }
+                .onChange(of: folderContents) { _, newContents in
+                    if !newContents.isEmpty, let url = activeItemURL {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            proxy.scrollTo(url)
+                        }
                     }
                 }
             }
@@ -1317,9 +1325,17 @@ struct ContentView: View {
     }
     
     private func loadFolder(url: URL) {
+        if let current = currentFolderURL, let active = activeItemURL {
+            folderHistory[current] = active
+        }
+        
         currentFolderURL = url
         folderContents = []
-        if activeItemURL?.deletingLastPathComponent() != url {
+        
+        if let savedActive = folderHistory[url] {
+            activeItemURL = savedActive
+            selectedItemURLs = [savedActive]
+        } else {
             activeItemURL = nil
             selectedItemURLs = []
         }

@@ -2,7 +2,7 @@
 
 
 
-- en la navegacion entre carpetas, cuando retorno de una carpeta hija a una padre, el sistema debe recordar cual fue la ultima posicion desde que entro, y volver a la misma posicion, pensarlo de manera recursiva para tener un mapa de navegacion mas amigable siempre
+
 
 - cuando estoy en modo full screen y navego entre imagenes, el aplicativo debe en el fondo tambien moviendo la seleccion en la que se encuentra y si retorno al modo normal, la imagen seleccionada debe ser la misma en la que estaba en modo full screen 
 
