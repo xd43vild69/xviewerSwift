@@ -71,6 +71,16 @@ class ThumbnailLoader {
             lock.unlock()
         }
     }
+    
+    func reset() {
+        lock.lock()
+        for (_, continuation) in pendingContinuations {
+            continuation.resume()
+        }
+        pendingContinuations.removeAll()
+        activeTasks = 0
+        lock.unlock()
+    }
 }
 
 class ThumbnailCache {
@@ -87,6 +97,10 @@ class ThumbnailCache {
     
     func set(_ image: NSImage, for url: URL) {
         cache.setObject(image, forKey: url as NSURL)
+    }
+    
+    func clear() {
+        cache.removeAllObjects()
     }
 }
 
@@ -878,13 +892,32 @@ struct ContentView: View {
     @State private var activePane: ActivePane = .left
     @State private var currentColumnCount: Int = 1
 
+    private var activeSidebarSelectionBinding: Binding<URL?> {
+        Binding<URL?>(
+            get: {
+                if isSplitViewEnabled && activePane == .right {
+                    return sidebarSelectionRight
+                } else {
+                    return sidebarSelection
+                }
+            },
+            set: { newValue in
+                if isSplitViewEnabled && activePane == .right {
+                    sidebarSelectionRight = newValue
+                } else {
+                    sidebarSelection = newValue
+                }
+            }
+        )
+    }
+
     private var leftPanel: some View {
         SidebarNavigationView(
             manager: sidebarManager,
-            selectedFolderURL: $sidebarSelection,
+            selectedFolderURL: activeSidebarSelectionBinding,
             performDropAction: { destinationURL in
-                let urlsToMove = Array(session.selectedItemURLs)
-                session.moveFiles(urls: urlsToMove, to: destinationURL)
+                let urlsToMove = Array(activeSession().selectedItemURLs)
+                activeSession().moveFiles(urls: urlsToMove, to: destinationURL)
             }
         )
             .fileImporter(
@@ -896,8 +929,13 @@ struct ContentView: View {
                 case .success(let urls):
                     if let rawURL = urls.first {
                         let secureURL = sidebarManager.makeSecureURL(rawURL)
-                        sidebarSelection = secureURL
-                        session.saveBookmark(for: secureURL)
+                        if isSplitViewEnabled && activePane == .right {
+                            sidebarSelectionRight = secureURL
+                            sessionRight.saveBookmark(for: secureURL)
+                        } else {
+                            sidebarSelection = secureURL
+                            session.saveBookmark(for: secureURL)
+                        }
                     }
                 case .failure(let error):
                     print("Error selecting folder: \(error.localizedDescription)")
@@ -1005,6 +1043,16 @@ struct ContentView: View {
         return session
     }
 
+    private func clearApplicationMemory() {
+        ThumbnailCache.shared.clear()
+        ThumbnailLoader.shared.reset()
+        session.clearMemory()
+        if isSplitViewEnabled {
+            sessionRight.clearMemory()
+        }
+        activeSession().showNotification("🧹 Memoria y caché liberadas")
+    }
+
     private var shortcutsGroup: some View {
         Group {
             Button(action: {
@@ -1091,10 +1139,10 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Divider()
             HStack {
-                if let url = session.activeItemURL ?? session.currentFolderURL {
+                if let url = activeSession().activeItemURL ?? activeSession().currentFolderURL {
                     Text(url.path)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(activePane == .left ? .red : .blue)
                         .lineLimit(1)
                         .truncationMode(.head)
                         .onHover { isHovering in
@@ -1110,18 +1158,18 @@ struct ContentView: View {
                             pasteboard.setString(url.path, forType: .string)
                             
                             withAnimation {
-                                session.showCopiedFeedback = true
+                                activeSession().showCopiedFeedback = true
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                                 withAnimation {
-                                    session.showCopiedFeedback = false
+                                    activeSession().showCopiedFeedback = false
                                 }
                             }
                         }
-                        .opacity(session.showCopiedFeedback ? 0.3 : 1.0)
+                        .opacity(activeSession().showCopiedFeedback ? 0.3 : 1.0)
                 }
                 
-                if session.showCopiedFeedback {
+                if activeSession().showCopiedFeedback {
                     Text("(Copied to clipboard)")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.green)
@@ -1130,12 +1178,12 @@ struct ContentView: View {
                 
                 Spacer()
                 
-                Text("\(session.imageItems.count) images" + (session.otherFileCount > 0 ? " | \(session.otherFileCount) other files" : ""))
+                Text("\(activeSession().imageItems.count) images" + (activeSession().otherFileCount > 0 ? " | \(activeSession().otherFileCount) other files" : ""))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .padding(.trailing, 8)
                 
-                Text(session.metadataString)
+                Text(activeSession().metadataString)
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -1202,7 +1250,12 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .onChange(of: sidebarSelection) { oldURL, newURL in
             if let url = newURL {
-                activeSession().loadFolder(url: url, sidebarManager: sidebarManager)
+                session.loadFolder(url: url, sidebarManager: sidebarManager)
+            }
+        }
+        .onChange(of: sidebarSelectionRight) { oldURL, newURL in
+            if let url = newURL {
+                sessionRight.loadFolder(url: url, sidebarManager: sidebarManager)
             }
         }
         .onChange(of: session.fullScreenImageURL) { oldURL, newURL in
@@ -1252,7 +1305,14 @@ struct ContentView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button(action: {
+                    clearApplicationMemory()
+                }) {
+                    Label("Clear Memory", systemImage: "arrow.clockwise")
+                }
+                .help("Clear Cache & Free Memory")
+                
                 Button(action: {
                     withAnimation {
                         isSplitViewEnabled.toggle()
@@ -1264,8 +1324,7 @@ struct ContentView: View {
                     Label("Split View", systemImage: isSplitViewEnabled ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
                 }
                 .keyboardShortcut("s", modifiers: [.command])
-            }
-            ToolbarItem(placement: .primaryAction) {
+                
                 Button(action: {
                     isShowingFolderPicker = true
                 }) {
@@ -1276,6 +1335,14 @@ struct ContentView: View {
         }
         .onAppear {
             setupKeyboardMonitor()
+            if session.currentFolderURL == nil {
+                let initialURL = session.restoreBookmark() ?? FileManager.default.homeDirectoryForCurrentUser
+                sidebarSelection = initialURL
+            }
+            if sessionRight.currentFolderURL == nil {
+                let initialURLRight = sessionRight.restoreBookmark() ?? FileManager.default.homeDirectoryForCurrentUser
+                sidebarSelectionRight = initialURLRight
+            }
         }
     }
     

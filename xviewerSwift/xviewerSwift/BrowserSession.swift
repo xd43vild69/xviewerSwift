@@ -870,4 +870,11 @@ func copySelectedItemToClipboard() {
         }
     }
 
+    func clearMemory() {
+        self.folderHistory.removeAll()
+        if let current = self.currentFolderURL {
+            self.loadFolder(url: current, sidebarManager: nil)
+        }
+    }
+
 }

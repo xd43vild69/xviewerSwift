@@ -110,12 +110,6 @@ struct PaneBrowserView: View {
             }
             .onAppear {
                 session.currentColumnCount = columns
-                if let url = session.restoreBookmark() {
-                    sidebarSelection = url
-                } else {
-                    let home = FileManager.default.homeDirectoryForCurrentUser
-                    sidebarSelection = home
-                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
