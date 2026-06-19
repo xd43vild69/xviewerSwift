@@ -24,6 +24,7 @@ class BrowserSession: ObservableObject {
     @Published var isShowingBulkRenameAlert = false
     @Published var bulkRenameBaseName: String = ""
     @Published var showCopiedFeedback: Bool = false
+    @Published var notificationMessage: String? = nil
     @Published var folderHistory: [URL: URL] = [:]
 
     var imageItems: [FileItem] {
@@ -172,6 +173,16 @@ func copySelectedItemToClipboard() {
         }
     }
     
+    
+    func showNotification(_ message: String) {
+        notificationMessage = message
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            if self.notificationMessage == message {
+                self.notificationMessage = nil
+            }
+        }
+    }
+
     func moveFiles(urls: [URL], to destinationDir: URL) {
         let destAccessed = destinationDir.startAccessingSecurityScopedResource()
         defer { if destAccessed { destinationDir.stopAccessingSecurityScopedResource() } }
