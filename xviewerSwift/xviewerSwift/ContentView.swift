@@ -16,29 +16,43 @@ enum SortOrder: String, CaseIterable {
 }
 
 struct FileItem: Identifiable, Hashable {
-    let id = UUID()
+    var id: URL { url }
     let url: URL
+    let name: String
     let isDirectory: Bool
     let creationDate: Date
     let fileSize: Int64
+    let isLocal: Bool
 }
 
 class ThumbnailLoader {
     static let shared = ThumbnailLoader()
     private var activeTasks = 0
-    private let maxTasks = 4
-    private var pendingContinuations: [CheckedContinuation<Void, Never>] = []
+    private let maxTasks = 8 // Increased for better core utilization
+    private var pendingContinuations: [(UUID, CheckedContinuation<Void, Never>)] = []
     private let lock = NSLock()
     
     func wait() async {
-        await withCheckedContinuation { continuation in
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                lock.lock()
+                if activeTasks < maxTasks {
+                    activeTasks += 1
+                    lock.unlock()
+                    continuation.resume()
+                } else {
+                    pendingContinuations.append((id, continuation))
+                    lock.unlock()
+                }
+            }
+        } onCancel: {
             lock.lock()
-            if activeTasks < maxTasks {
-                activeTasks += 1
+            if let index = pendingContinuations.firstIndex(where: { $0.0 == id }) {
+                let continuation = pendingContinuations.remove(at: index).1
                 lock.unlock()
                 continuation.resume()
             } else {
-                pendingContinuations.append(continuation)
                 lock.unlock()
             }
         }
@@ -47,7 +61,7 @@ class ThumbnailLoader {
     func signal() {
         lock.lock()
         if !pendingContinuations.isEmpty {
-            let continuation = pendingContinuations.removeFirst()
+            let continuation = pendingContinuations.removeFirst().1
             lock.unlock()
             continuation.resume()
         } else {
@@ -76,6 +90,7 @@ class ThumbnailCache {
 
 struct FileItemView: View {
     let url: URL
+    let isLocal: Bool
     @State private var thumbnail: NSImage?
     
     var body: some View {
@@ -116,6 +131,34 @@ struct FileItemView: View {
             return
         }
         
+        if isLocal {
+            let img = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+                let options: [CFString: Any] = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 160
+                ]
+                if let imageSource = CGImageSourceCreateWithURL(self.url as CFURL, nil),
+                   let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
+                    return NSImage(cgImage: cgImage, size: .zero)
+                }
+                return nil
+            }.value
+            
+            if let img = img {
+                ThumbnailCache.shared.set(img, for: self.url)
+                self.thumbnail = img
+            } else {
+                await loadQuickLookThumbnail()
+            }
+        } else {
+            // For network shares, QLThumbnailGenerator is preferred as it relies on Finder's
+            // daemon and cached icons instead of streaming full files over SMB.
+            await loadQuickLookThumbnail()
+        }
+    }
+    
+    private func loadQuickLookThumbnail() async {
         let size = CGSize(width: 160, height: 160)
         let request = QLThumbnailGenerator.Request(
             fileAt: url,
@@ -124,12 +167,11 @@ struct FileItemView: View {
             representationTypes: .thumbnail
         )
         
-        do {
-            let representation = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
-            let nsImage = representation.nsImage
-            ThumbnailCache.shared.set(nsImage, for: self.url)
-            self.thumbnail = nsImage
-        } catch {
+        if let representation = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) {
+            ThumbnailCache.shared.set(representation.nsImage, for: self.url)
+            self.thumbnail = representation.nsImage
+        } else if !isLocal {
+            // Ultimate fallback for network shares if QuickLook fails: fetch over network
             let img = await Task.detached(priority: .userInitiated) { () -> NSImage? in
                 let options: [CFString: Any] = [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -440,7 +482,7 @@ struct GridItemCell: View {
                     .frame(width: 50, height: 50)
                     .foregroundColor(.blue)
             } else {
-                FileItemView(url: item.url)
+                FileItemView(url: item.url, isLocal: item.isLocal)
             }
             Text(item.url.lastPathComponent)
                 .font(.caption)
@@ -1343,7 +1385,7 @@ struct ContentView: View {
             
             switch currentSortOrder {
             case .name:
-                return $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending
+                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
             case .date:
                 return $0.creationDate > $1.creationDate
             case .size:
@@ -1370,52 +1412,56 @@ struct ContentView: View {
         }
         
         DispatchQueue.global(qos: .userInitiated).async {
-            guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else {
+            guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else {
                 return
             }
             
             var batch: [FileItem] = []
             var allItems: [FileItem] = []
+            let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "webp"]
             
             for case let fileURL as URL in enumerator {
                 var isDirectory = false
                 var fileDate = Date.distantPast
                 var fileSize: Int64 = 0
+                var isLocal = true
                 
-                if let resourceValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey]) {
+                if let resourceValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey]) {
                     isDirectory = resourceValues.isDirectory ?? false
                     fileDate = resourceValues.creationDate ?? Date.distantPast
                     fileSize = Int64(resourceValues.fileSize ?? 0)
+                    isLocal = resourceValues.volumeIsLocal ?? true
                 }
+                
+                let fileName = fileURL.lastPathComponent
                 
                 if !isDirectory {
                     let ext = fileURL.pathExtension.lowercased()
-                    let imageExtensions = ["jpg", "jpeg", "png", "gif", "heic", "webp"]
                     if imageExtensions.contains(ext) {
-                        batch.append(FileItem(url: fileURL, isDirectory: false, creationDate: fileDate, fileSize: fileSize))
+                        batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
                     }
                 } else {
-                    batch.append(FileItem(url: fileURL, isDirectory: true, creationDate: fileDate, fileSize: fileSize))
+                    batch.append(FileItem(url: fileURL, name: fileName, isDirectory: true, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
                 }
                 
                 if batch.count >= 100 {
                     allItems.append(contentsOf: batch)
                     batch.removeAll(keepingCapacity: true)
                     
-                    let sortedItems = self.sortItems(allItems)
+                    let currentItems = allItems // Unsorted preview
                     
                     DispatchQueue.main.async {
                         guard self.currentFolderURL == url else { return }
-                        self.folderContents = sortedItems
+                        self.folderContents = currentItems
                         if self.activeItemURL == nil {
-                            if let u = sortedItems.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
+                            if let u = currentItems.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
                         }
                     }
                 }
             }
             
-            if !batch.isEmpty || allItems.isEmpty {
-                allItems.append(contentsOf: batch)
+            allItems.append(contentsOf: batch)
+            if !allItems.isEmpty {
                 let sortedItems = self.sortItems(allItems)
                 
                 DispatchQueue.main.async {
@@ -1424,6 +1470,11 @@ struct ContentView: View {
                     if self.activeItemURL == nil {
                         if let u = sortedItems.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
                     }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    guard self.currentFolderURL == url else { return }
+                    self.folderContents = []
                 }
             }
         }
