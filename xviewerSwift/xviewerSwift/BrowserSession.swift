@@ -38,25 +38,79 @@ func copySelectedItemToClipboard() {
         pasteboard.writeObjects(self.selectedItemURLs.map { $0 as NSURL })
     }
     
-    func pasteFromClipboard() {
+    func pasteFromClipboard(move: Bool = false) {
         guard let targetFolder = self.currentFolderURL else { return }
         let pasteboard = NSPasteboard.general
         
         var pastedSomething = false
         
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
-            for sourceURL in urls where sourceURL.isFileURL {
-                let destinationURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
-                do {
-                    if !FileManager.default.fileExists(atPath: destinationURL.path) {
-                        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
-                        pastedSomething = true
+            let fileURLs = urls.filter { $0.isFileURL }
+            guard !fileURLs.isEmpty else { return }
+            
+            if move {
+                let destAccessed = targetFolder.startAccessingSecurityScopedResource()
+                defer { if destAccessed { targetFolder.stopAccessingSecurityScopedResource() } }
+                
+                let fm = FileManager.default
+                var successfullyMoved: [URL] = []
+                
+                for sourceURL in fileURLs {
+                    if sourceURL.deletingLastPathComponent().standardizedFileURL == targetFolder.standardizedFileURL {
+                        continue
                     }
-                } catch {
-                    print("Error copying file: \(error)")
+                    
+                    let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
+                    let originalName = sourceURL.deletingPathExtension().lastPathComponent
+                    let ext = sourceURL.pathExtension
+                    var finalURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
+                    
+                    var counter = 1
+                    while fm.fileExists(atPath: finalURL.path) {
+                        let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
+                        finalURL = targetFolder.appendingPathComponent(newName)
+                        counter += 1
+                    }
+                    
+                    do {
+                        try fm.moveItem(at: sourceURL, to: finalURL)
+                        successfullyMoved.append(sourceURL)
+                        pastedSomething = true
+                    } catch {
+                        print("Error moving file \(sourceURL.lastPathComponent): \(error)")
+                    }
+                    
+                    if sourceAccessed {
+                        sourceURL.stopAccessingSecurityScopedResource()
+                    }
+                }
+                
+                if pastedSomething {
+                    loadFolder(url: targetFolder, sidebarManager: nil)
+                    showNotification("Moved \(successfullyMoved.count) items")
+                } else {
+                    NSSound.beep()
+                }
+            } else {
+                for sourceURL in fileURLs {
+                    let destinationURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
+                    do {
+                        if !FileManager.default.fileExists(atPath: destinationURL.path) {
+                            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+                            pastedSomething = true
+                        }
+                    } catch {
+                        print("Error copying file: \(error)")
+                    }
+                }
+                
+                if pastedSomething {
+                    loadFolder(url: targetFolder, sidebarManager: nil)
+                } else {
+                    NSSound.beep()
                 }
             }
-        } else if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage], let firstImage = images.first {
+        } else if !move, let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage], let firstImage = images.first {
             if let tiff = firstImage.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let pngData = bitmap.representation(using: .png, properties: [:]) {
                 let formatter = DateFormatter()
                 formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
@@ -69,12 +123,12 @@ func copySelectedItemToClipboard() {
                     print("Error saving image: \(error)")
                 }
             }
-        }
-        
-        if pastedSomething {
-            loadFolder(url: targetFolder, sidebarManager: nil)
-        } else {
-            NSSound.beep() // Provide feedback if paste failed or was empty
+            
+            if pastedSomething {
+                loadFolder(url: targetFolder, sidebarManager: nil)
+            } else {
+                NSSound.beep()
+            }
         }
     }
     
@@ -332,6 +386,9 @@ func copySelectedItemToClipboard() {
         textField.stringValue = "New Folder"
         alert.accessoryView = textField
         
+        alert.layout()
+        alert.window.initialFirstResponder = textField
+        
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
             let folderName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -452,6 +509,13 @@ func copySelectedItemToClipboard() {
             }
         }
     }
+    func renameSelected() {
+        if selectedItemURLs.count > 1 {
+            promptBulkRename()
+        } else if let active = activeItemURL {
+            promptSingleRename(for: active)
+        }
+    }
     
     func promptSingleRename(for url: URL) {
         let baseName = url.deletingPathExtension().lastPathComponent
@@ -464,6 +528,9 @@ func copySelectedItemToClipboard() {
         let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
         textField.stringValue = baseName
         alert.accessoryView = textField
+        
+        alert.layout()
+        alert.window.initialFirstResponder = textField
         
         if alert.runModal() == .alertFirstButtonReturn {
             let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -482,6 +549,9 @@ func copySelectedItemToClipboard() {
         
         let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
         alert.accessoryView = textField
+        
+        alert.layout()
+        alert.window.initialFirstResponder = textField
         
         if alert.runModal() == .alertFirstButtonReturn {
             let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)

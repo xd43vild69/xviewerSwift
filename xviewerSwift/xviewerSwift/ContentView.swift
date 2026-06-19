@@ -940,22 +940,60 @@ struct ContentView: View {
         if eventMonitor == nil {
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 let shiftPressed = event.modifierFlags.contains(.shift)
-                switch event.keyCode {
-                case 123: // Left arrow
-                    activeSession().handleLeftArrow(shift: shiftPressed)
-                    return nil // consume event
-                case 124: // Right arrow
-                    activeSession().handleRightArrow(shift: shiftPressed)
-                    return nil
-                case 125: // Down arrow
-                    activeSession().handleDownArrow(shift: shiftPressed)
-                    return nil
-                case 126: // Up arrow
-                    activeSession().handleUpArrow(shift: shiftPressed)
-                    return nil
-                default:
-                    return event
+                let commandPressed = event.modifierFlags.contains(.command)
+                
+                // Allow normal typing/navigation in text input fields (e.g. rename textfields)
+                if let responder = NSApp.keyWindow?.firstResponder {
+                    let responderClassName = String(describing: type(of: responder))
+                    if responderClassName.contains("Text") {
+                        return event
+                    }
                 }
+                
+                if commandPressed, let chars = event.charactersIgnoringModifiers?.lowercased() {
+                    if chars == "v" {
+                        activeSession().pasteFromClipboard(move: shiftPressed)
+                        // Force both panels to refresh
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            if let leftFolder = session.currentFolderURL {
+                                session.loadFolder(url: leftFolder, sidebarManager: sidebarManager)
+                            }
+                            if isSplitViewEnabled, let rightFolder = sessionRight.currentFolderURL {
+                                sessionRight.loadFolder(url: rightFolder, sidebarManager: sidebarManager)
+                            }
+                        }
+                        return nil
+                    } else if chars == "c" {
+                        activeSession().copySelectedItemToClipboard()
+                        return nil
+                    }
+                }
+                
+                let optionPressed = event.modifierFlags.contains(.option)
+                
+                if !commandPressed && !optionPressed {
+                    switch event.keyCode {
+                    case 120: // F2 key
+                        activeSession().renameSelected()
+                        return nil // consume event
+                    case 123: // Left arrow
+                        activeSession().handleLeftArrow(shift: shiftPressed)
+                        return nil // consume event
+                    case 124: // Right arrow
+                        activeSession().handleRightArrow(shift: shiftPressed)
+                        return nil
+                    case 125: // Down arrow
+                        activeSession().handleDownArrow(shift: shiftPressed)
+                        return nil
+                    case 126: // Up arrow
+                        activeSession().handleUpArrow(shift: shiftPressed)
+                        return nil
+                    default:
+                        break
+                    }
+                }
+                
+                return event
             }
         }
     }
@@ -1026,14 +1064,7 @@ struct ContentView: View {
                 .keyboardShortcut(.downArrow, modifiers: [.command])
                 .opacity(0)
                 
-            Button(action: { activeSession().copySelectedItemToClipboard() }) { Text("") }
-                .keyboardShortcut("c", modifiers: [.command])
-                .opacity(0)
-                
-            Button(action: { activeSession().pasteFromClipboard() }) { Text("") }
-                .keyboardShortcut("v", modifiers: [.command])
-                .opacity(0)
-                
+
             Button(action: { activeSession().deleteSelectedItem() }) { Text("") }
                 .keyboardShortcut(KeyEquivalent("\u{7F}"), modifiers: []) // Backspace
                 .opacity(0)
@@ -1242,6 +1273,9 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("o", modifiers: [.command])
             }
+        }
+        .onAppear {
+            setupKeyboardMonitor()
         }
     }
     
