@@ -2,6 +2,7 @@
 
 - contar en status bar cuantos archivos hay - total en imagenes y total otros
 
+- en el status bar aparece el tamano de la imagen seleccionada y el nombre, quiero que aparezca el numero de imagens y tambien el numero total de archivos por que algunas veces hay otro tipo de archivos que no son imagenes pero quiero conocer tambien si hay otro tipo de archivos en esta carpeta, para no tener problemas al borrar o hacer otras operaciones en carpetas
 
 - 🟡 terminal integrated into the app, this is the most avance and sync feature
 

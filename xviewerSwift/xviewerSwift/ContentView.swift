@@ -1035,7 +1035,7 @@ struct ContentView: View {
     }
     
     private func selectAllItems() {
-        selectedItemURLs = Set(folderContents.map { $0.url })
+        selectedItemURLs = Set(folderContents.filter { !$0.isDirectory }.map { $0.url })
     }
     
     private func deleteSelectedItem() {
