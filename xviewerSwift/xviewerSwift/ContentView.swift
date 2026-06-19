@@ -1138,7 +1138,7 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .onChange(of: sidebarSelection) { oldURL, newURL in
             if let url = newURL {
-                session.loadFolder(url: url, sidebarManager: sidebarManager)
+                activeSession().loadFolder(url: url, sidebarManager: sidebarManager)
             }
         }
         .onChange(of: session.fullScreenImageURL) { oldURL, newURL in
@@ -1181,6 +1181,7 @@ struct ContentView: View {
                 }) {
                     Label("Split View", systemImage: isSplitViewEnabled ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
                 }
+                .keyboardShortcut("s", modifiers: [.command])
             }
             ToolbarItem(placement: .primaryAction) {
                 Button(action: {
