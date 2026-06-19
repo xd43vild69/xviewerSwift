@@ -1020,7 +1020,31 @@ struct ContentView: View {
         guard !targets.isEmpty else { return }
         
         let allItems = folderContents.filter { !$0.isDirectory }
-        let nextURL = allItems.first(where: { !targets.contains($0.url) })?.url
+        
+        var nextURL: URL? = nil
+        if let targetURL = fullScreenImageURL ?? activeItemURL,
+           let index = allItems.firstIndex(where: { $0.url == targetURL }) {
+            // First, try to find the previous item that is not being deleted
+            for i in stride(from: index - 1, through: 0, by: -1) {
+                if !targets.contains(allItems[i].url) {
+                    nextURL = allItems[i].url
+                    break
+                }
+            }
+            // If no previous item found, try to find the next item
+            if nextURL == nil {
+                for i in stride(from: index + 1, to: allItems.count, by: 1) {
+                    if !targets.contains(allItems[i].url) {
+                        nextURL = allItems[i].url
+                        break
+                    }
+                }
+            }
+        }
+        
+        if nextURL == nil {
+            nextURL = allItems.first(where: { !targets.contains($0.url) })?.url
+        }
         
         do {
             for url in targets {
