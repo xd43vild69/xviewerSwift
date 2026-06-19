@@ -28,7 +28,7 @@ struct FileItem: Identifiable, Hashable {
 class ThumbnailLoader {
     static let shared = ThumbnailLoader()
     private var activeTasks = 0
-    private let maxTasks = 8 // Increased for better core utilization
+    var maxTasks = 8
     private var pendingContinuations: [(UUID, CheckedContinuation<Void, Never>)] = []
     private let lock = NSLock()
     
@@ -60,12 +60,14 @@ class ThumbnailLoader {
     
     func signal() {
         lock.lock()
-        if !pendingContinuations.isEmpty {
+        activeTasks -= 1
+        
+        if !pendingContinuations.isEmpty && activeTasks < maxTasks {
+            activeTasks += 1
             let continuation = pendingContinuations.removeFirst().1
             lock.unlock()
             continuation.resume()
         } else {
-            activeTasks -= 1
             lock.unlock()
         }
     }
@@ -1410,6 +1412,13 @@ struct ContentView: View {
             activeItemURL = nil
             selectedItemURLs = []
         }
+        
+        var isLocalFolder = true
+        if let resourceValues = try? url.resourceValues(forKeys: [.volumeIsLocalKey]),
+           let local = resourceValues.volumeIsLocal {
+            isLocalFolder = local
+        }
+        ThumbnailLoader.shared.maxTasks = isLocalFolder ? 8 : 2
         
         DispatchQueue.global(qos: .userInitiated).async {
             guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else {
