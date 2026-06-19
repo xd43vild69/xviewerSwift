@@ -858,7 +858,10 @@ struct ContentView: View {
     @StateObject private var sidebarManager = SidebarManager()
     @State private var isShowingFolderPicker = false
     @State private var sidebarSelection: URL?
+    @State private var sidebarSelectionRight: URL?
     @StateObject private var session = BrowserSession()
+    @StateObject private var sessionRight = BrowserSession()
+    @State private var isSplitViewEnabled = false
     @State private var currentColumnCount: Int = 1
 
     private var leftPanel: some View {
@@ -1018,7 +1021,18 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     leftPanel
                         .frame(width: mainGeometry.size.width * 0.1)
-                    PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
+                    
+                    if isSplitViewEnabled {
+                        HSplitView {
+                            PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
+                                .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
+                            PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelectionRight, session: sessionRight)
+                                .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    } else {
+                        PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
                 
                 // Full screen presentation is now handled via .onChange of session.fullScreenImageURL
@@ -1066,6 +1080,15 @@ struct ContentView: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
+                    withAnimation {
+                        isSplitViewEnabled.toggle()
+                    }
+                }) {
+                    Label("Split View", systemImage: isSplitViewEnabled ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button(action: {
                     isShowingFolderPicker = true
