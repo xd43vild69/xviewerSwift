@@ -14,7 +14,7 @@
   - **Quick Favorites (`Cmd + M`):** While in Full-Screen view, instantly copy the current image to a designated Favorites folder.
   - **Smart RAW Pairing:** When saving a favorite, the app automatically detects and copies any associated RAW file (e.g., `.cr2`, `.nef`, `.arw`) to keep your pairs intact.
   - **Global Settings:** Easily configure the destination path for your favorites via a sleek, native settings modal accessible from the sidebar.
-- **Bulk & Single Renaming:** Easily rename single files or batch-rename multiple images sequentially with custom prefixes via the context menu.
+- **Bulk & Single Renaming:** Easily rename single files (by pressing `F2`) or batch-rename multiple images sequentially with custom prefixes via the context menu.
 - **Native Drag & Drop:** Seamlessly drag and drop files to move them into other folders within the grid or directly into pinned sidebar locations. 
 - **Intelligent Collision Handling:** File movements and favorites copying handle naming conflicts automatically (appending suffixes like `_1` to images and their paired RAWs) without disrupting your workflow.
 - **Create & Move:** Create new folders and move items using standard system dialogs.
@@ -35,6 +35,7 @@
   - Navigate grids and menus instantly using **Arrow keys**.
   - Jump directly to the first or last image using `Cmd + Shift + Up Arrow` and `Cmd + Shift + Down Arrow`.
   - Go up a directory using `Cmd + Up Arrow`.
+  - Open a specific folder via dialog with `Cmd + O`.
   - Create a new folder quickly with `Cmd + Shift + N`.
   - Delete items using `Cmd + Backspace` or `Delete`.
   - Return to grid view or close modals with `Esc`.
