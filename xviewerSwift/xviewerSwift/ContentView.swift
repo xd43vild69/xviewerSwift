@@ -1006,8 +1006,23 @@ struct ContentView: View {
                         return nil
                     }
                 }
-                
                 let optionPressed = event.modifierFlags.contains(.option)
+                if commandPressed && !optionPressed {
+                    if shiftPressed {
+                        if event.keyCode == 126 { // Up arrow
+                            activeSession().navigateToFirst()
+                            return nil
+                        } else if event.keyCode == 125 { // Down arrow
+                            activeSession().navigateToLast()
+                            return nil
+                        }
+                    } else {
+                        if event.keyCode == 126 { // Up arrow
+                            activeSession().navigateUp()
+                            return nil
+                        }
+                    }
+                }
                 
                 if !commandPressed && !optionPressed {
                     switch event.keyCode {
@@ -1078,10 +1093,6 @@ struct ContentView: View {
                 }
             }) { Text("") }
                 .keyboardShortcut(.leftArrow, modifiers: [.option])
-                .opacity(0)
-
-            Button(action: { activeSession().navigateUp() }) { Text("") }
-                .keyboardShortcut(.upArrow, modifiers: [.command])
                 .opacity(0)
 
             Button(action: { activeSession().handleUpArrow(shift: NSEvent.modifierFlags.contains(.shift)) }) { Text("") }

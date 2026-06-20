@@ -655,6 +655,38 @@ func copySelectedItemToClipboard() {
         }
     }
     
+    func navigateToFirst() {
+        if self.fullScreenImageURL != nil {
+            if let first = imageItems.first {
+                self.fullScreenImageURL = first.url
+                self.activeItemURL = first.url
+                self.selectedItemURLs = [first.url]
+            }
+        } else {
+            guard !self.folderContents.isEmpty else { return }
+            if let first = self.folderContents.first {
+                self.activeItemURL = first.url
+                self.selectedItemURLs = [first.url]
+            }
+        }
+    }
+    
+    func navigateToLast() {
+        if self.fullScreenImageURL != nil {
+            if let last = imageItems.last {
+                self.fullScreenImageURL = last.url
+                self.activeItemURL = last.url
+                self.selectedItemURLs = [last.url]
+            }
+        } else {
+            guard !self.folderContents.isEmpty else { return }
+            if let last = self.folderContents.last {
+                self.activeItemURL = last.url
+                self.selectedItemURLs = [last.url]
+            }
+        }
+    }
+    
     func handleLeftArrow(shift: Bool = false) {
         if self.fullScreenImageURL != nil {
             navigateFullScreen(direction: -1)

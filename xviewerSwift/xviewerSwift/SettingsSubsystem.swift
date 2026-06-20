@@ -123,6 +123,8 @@ struct SettingsView: View {
                 ShortcutRow(action: "Toggle Split View", key: "Tab")
                 ShortcutRow(action: "Navigate Up", key: "Cmd + Up Arrow")
                 ShortcutRow(action: "Navigate Items", key: "Arrow Keys")
+                ShortcutRow(action: "Navigate to First", key: "Cmd + Shift + Up Arrow")
+                ShortcutRow(action: "Navigate to Last", key: "Cmd + Shift + Down Arrow")
                 ShortcutRow(action: "Select All", key: "Cmd + A")
                 ShortcutRow(action: "Delete Item", key: "Backspace / Delete")
                 ShortcutRow(action: "Create New Folder", key: "Cmd + Shift + N")
