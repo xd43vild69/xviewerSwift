@@ -132,42 +132,51 @@ func copySelectedItemToClipboard() {
             if move {
                 let destAccessed = targetFolder.startAccessingSecurityScopedResource()
                 defer { if destAccessed { targetFolder.stopAccessingSecurityScopedResource() } }
-                
+
                 let fm = FileManager.default
                 var successfullyMoved: [URL] = []
-                
+                var movedSet: Set<URL> = []
+
                 for sourceURL in fileURLs {
                     if sourceURL.deletingLastPathComponent().standardizedFileURL == targetFolder.standardizedFileURL {
                         continue
                     }
-                    
+
                     let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
                     let originalName = sourceURL.deletingPathExtension().lastPathComponent
                     let ext = sourceURL.pathExtension
                     var finalURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
-                    
+
                     var counter = 1
                     while fm.fileExists(atPath: finalURL.path) {
                         let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
                         finalURL = targetFolder.appendingPathComponent(newName)
                         counter += 1
                     }
-                    
+
                     do {
                         try fm.moveItem(at: sourceURL, to: finalURL)
                         successfullyMoved.append(sourceURL)
+                        movedSet.insert(sourceURL)
                         pastedSomething = true
                     } catch {
                         print("Error moving file \(sourceURL.lastPathComponent): \(error)")
                     }
-                    
+
                     if sourceAccessed {
                         sourceURL.stopAccessingSecurityScopedResource()
                     }
                 }
-                
+
                 if pastedSomething {
-                    loadFolder(url: targetFolder, sidebarManager: nil)
+                    let nextFocus = self.computeNextFocus(for: self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: movedSet)
+                    self.loadFolder(url: targetFolder, sidebarManager: nil)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        if let next = nextFocus {
+                            self.activeItemURL = next
+                            self.selectedItemURLs = [next]
+                        }
+                    }
                     showNotification("Moved \(successfullyMoved.count) items")
                 } else {
                     NSSound.beep()
@@ -252,37 +261,36 @@ func copySelectedItemToClipboard() {
         }
     }
     
+    private func computeNextFocus(for itemURL: URL, excluding targets: Set<URL>) -> URL? {
+        let allItems = self.folderContents.filter { !$0.isDirectory }
+
+        guard let index = allItems.firstIndex(where: { $0.url == itemURL }) else {
+            return allItems.first(where: { !targets.contains($0.url) })?.url
+        }
+
+        // Try to find the previous item that is not being excluded
+        for i in stride(from: index - 1, through: 0, by: -1) {
+            if !targets.contains(allItems[i].url) {
+                return allItems[i].url
+            }
+        }
+
+        // If no previous item found, try to find the next item
+        for i in stride(from: index + 1, to: allItems.count, by: 1) {
+            if !targets.contains(allItems[i].url) {
+                return allItems[i].url
+            }
+        }
+
+        return nil
+    }
+
     func deleteSelectedItem() {
         var targets = self.selectedItemURLs
         if let fsURL = self.fullScreenImageURL { targets.insert(fsURL) }
         guard !targets.isEmpty else { return }
-        
-        let allItems = self.folderContents.filter { !$0.isDirectory }
-        
-        var nextURL: URL? = nil
-        if let targetURL = self.fullScreenImageURL ?? self.activeItemURL,
-           let index = allItems.firstIndex(where: { $0.url == targetURL }) {
-            // First, try to find the previous item that is not being deleted
-            for i in stride(from: index - 1, through: 0, by: -1) {
-                if !targets.contains(allItems[i].url) {
-                    nextURL = allItems[i].url
-                    break
-                }
-            }
-            // If no previous item found, try to find the next item
-            if nextURL == nil {
-                for i in stride(from: index + 1, to: allItems.count, by: 1) {
-                    if !targets.contains(allItems[i].url) {
-                        nextURL = allItems[i].url
-                        break
-                    }
-                }
-            }
-        }
-        
-        if nextURL == nil {
-            nextURL = allItems.first(where: { !targets.contains($0.url) })?.url
-        }
+
+        let nextURL = computeNextFocus(for: self.fullScreenImageURL ?? self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: targets)
         
         do {
             for url in targets {
@@ -310,18 +318,17 @@ func copySelectedItemToClipboard() {
     func moveItem(_ url: URL) {
         var targets = self.selectedItemURLs
         if !targets.contains(url) { targets.insert(url) }
-        
+
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Move"
         panel.message = "Choose destination folder"
-        
+
         if panel.runModal() == .OK, let destinationURL = panel.url {
-            let allItems = self.folderContents.filter { !$0.isDirectory }
-            let nextURL = allItems.first(where: { !targets.contains($0.url) })?.url
-            
+            let nextURL = computeNextFocus(for: self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: targets)
+
             do {
                 for tURL in targets {
                     let finalURL = destinationURL.appendingPathComponent(tURL.lastPathComponent)
@@ -356,40 +363,47 @@ func copySelectedItemToClipboard() {
     func moveFiles(urls: [URL], to destinationDir: URL) {
         let destAccessed = destinationDir.startAccessingSecurityScopedResource()
         defer { if destAccessed { destinationDir.stopAccessingSecurityScopedResource() } }
-        
+
         var successfullyMoved: Set<URL> = []
         let fm = FileManager.default
-        
+
         for sourceURL in urls {
             let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
-            
+
             let originalName = sourceURL.deletingPathExtension().lastPathComponent
             let ext = sourceURL.pathExtension
             var finalURL = destinationDir.appendingPathComponent(sourceURL.lastPathComponent)
-            
+
             var counter = 1
             while fm.fileExists(atPath: finalURL.path) {
                 let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
                 finalURL = destinationDir.appendingPathComponent(newName)
                 counter += 1
             }
-            
+
             do {
                 try fm.moveItem(at: sourceURL, to: finalURL)
                 successfullyMoved.insert(sourceURL)
             } catch {
                 print("Error moving file \(sourceURL.lastPathComponent): \(error)")
             }
-            
+
             if sourceAccessed {
                 sourceURL.stopAccessingSecurityScopedResource()
             }
         }
-        
+
         if !successfullyMoved.isEmpty {
             DispatchQueue.main.async {
+                let nextFocus = self.computeNextFocus(for: self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: successfullyMoved)
                 self.folderContents.removeAll(where: { successfullyMoved.contains($0.url) })
                 self.selectedItemURLs.subtract(successfullyMoved)
+                if let next = nextFocus {
+                    self.activeItemURL = next
+                    self.selectedItemURLs = [next]
+                } else {
+                    self.activeItemURL = nil
+                }
             }
         }
     }
@@ -700,20 +714,19 @@ func copySelectedItemToClipboard() {
         let directory = originalURL.deletingLastPathComponent()
         let ext = originalURL.pathExtension
         let newURL = ext.isEmpty ? directory.appendingPathComponent(newBaseName) : directory.appendingPathComponent("\(newBaseName).\(ext)")
-        
-        Task { await processRenames(moves: [(originalURL, newURL)]) }
+
+        Task { await processRenames(moves: [(originalURL, newURL)], focusURL: originalURL) }
     }
 
     func executeBulkRename(baseName: String) {
         guard let dir = self.currentFolderURL else { return }
-        
+
         let filesToRename: [FileItem]
         if self.selectedItemURLs.count > 1 {
             filesToRename = self.folderContents.filter { self.selectedItemURLs.contains($0.url) && !$0.isDirectory }
         } else {
             filesToRename = self.folderContents.filter { !$0.isDirectory }
         }
-        
 
         var moves: [(URL, URL)] = []
         for (index, file) in filesToRename.enumerated() {
@@ -724,38 +737,39 @@ func copySelectedItemToClipboard() {
             let newURL = dir.appendingPathComponent(newFileName)
             moves.append((originalURL, newURL))
         }
-        
+
         let logStr = moves.map { "\($0.0.lastPathComponent) -> \($0.1.lastPathComponent)" }.joined(separator: "\n")
         try? logStr.write(toFile: "/tmp/rename_log.txt", atomically: true, encoding: .utf8)
-        Task { await processRenames(moves: moves) }
+        Task { await processRenames(moves: moves, focusURL: self.activeItemURL) }
     }
 
     @MainActor
-    func processRenames(moves: [(URL, URL)]) async {
+    func processRenames(moves: [(URL, URL)], focusURL: URL? = nil) async {
         let parentFolder = self.currentFolderURL
         let parentAccessed = parentFolder?.startAccessingSecurityScopedResource() ?? false
-        
+        let renamingURLs = Set(moves.map { $0.0 })
+
         // Phase 1: Rename to temporary names to avoid intra-batch collisions
         var tempMoves: [(URL, URL)] = []
         for (source, destination) in moves {
             if source == destination { continue }
-            
+
             let itemAccessed = source.startAccessingSecurityScopedResource()
             let tempName = UUID().uuidString + "_" + source.lastPathComponent
             let tempURL = source.deletingLastPathComponent().appendingPathComponent(tempName)
-            
+
             do {
                 try FileManager.default.moveItem(at: source, to: tempURL)
                 tempMoves.append((tempURL, destination))
             } catch {
                 print("Error creating temp file for \(source.lastPathComponent): \(error)")
             }
-            
+
             if itemAccessed {
                 source.stopAccessingSecurityScopedResource()
             }
         }
-        
+
         // Phase 2: Rename to final names
         for (tempURL, destination) in tempMoves {
             do {
@@ -768,13 +782,20 @@ func copySelectedItemToClipboard() {
                 print("Error renaming temp file to \(destination.lastPathComponent): \(error)")
             }
         }
-        
+
         if parentAccessed {
             parentFolder?.stopAccessingSecurityScopedResource()
         }
-        
+
         if let url = self.currentFolderURL {
+            let nextFocus = focusURL.flatMap { computeNextFocus(for: $0, excluding: renamingURLs) }
             self.loadFolder(url: url, sidebarManager: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if let next = nextFocus {
+                    self.activeItemURL = next
+                    self.selectedItemURLs = [next]
+                }
+            }
         }
     }
     
