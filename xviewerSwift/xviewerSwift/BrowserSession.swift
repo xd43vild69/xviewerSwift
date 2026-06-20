@@ -1111,4 +1111,42 @@ func copySelectedItemToClipboard() {
         }
     }
 
+    // MARK: - Folder Partitioning (SMB Friendly)
+
+    func partitionCurrentFolder() {
+        guard let folderURL = currentFolderURL else { return }
+        let folderName = folderURL.lastPathComponent
+
+        let images = imageItems
+        guard !images.isEmpty else { return }
+
+        let blockSize = 100
+        let blocks = stride(from: 0, to: images.count, by: blockSize)
+            .map { Array(images[$0..<min($0 + blockSize, images.count)]) }
+
+        for block in blocks {
+            let partNum = nextAvailablePartitionNumber(in: folderURL, baseName: folderName)
+            let partFolderName = "\(folderName)_\(partNum)"
+            let partFolderURL = folderURL.appendingPathComponent(partFolderName)
+
+            try? FileManager.default.createDirectory(at: partFolderURL,
+                                                     withIntermediateDirectories: false)
+
+            let imageURLs = block.map { $0.url }
+            moveFiles(urls: imageURLs, to: partFolderURL)
+        }
+
+        loadFolder(url: folderURL, sidebarManager: sidebarManager)
+    }
+
+    private func nextAvailablePartitionNumber(in folderURL: URL, baseName: String) -> Int {
+        let fm = FileManager.default
+        var num = 1
+
+        while fm.fileExists(atPath: folderURL.appendingPathComponent("\(baseName)_\(num)").path) {
+            num += 1
+        }
+        return num
+    }
+
 }

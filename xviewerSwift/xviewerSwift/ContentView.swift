@@ -791,7 +791,7 @@ struct GridItemCell: View {
     let toggleBookmarkAction: () -> Void
     let isSingleSelection: Bool
     let performDropAction: (URL) -> Void
-    
+
     @State private var isTargeted: Bool = false
     
     var body: some View {

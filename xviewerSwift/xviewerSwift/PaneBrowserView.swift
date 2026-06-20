@@ -146,6 +146,12 @@ struct PaneBrowserView: View {
             Button { session.promptBulkRename() } label: {
                 Label(session.selectedItemURLs.count > 1 ? "Rename \(session.selectedItemURLs.count) Items..." : "Rename All...", systemImage: "pencil.line")
             }
+            if !session.imageItems.isEmpty {
+                Divider()
+                Button { session.partitionCurrentFolder() } label: {
+                    Label("Partitioning (100 imgs/folder)", systemImage: "rectangle.split.3x1")
+                }
+            }
         }
     
     }
