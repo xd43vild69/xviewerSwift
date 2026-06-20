@@ -5,6 +5,7 @@ struct PaneBrowserView: View {
     @ObservedObject var sidebarManager: SidebarManager
     @Binding var sidebarSelection: URL?
     @ObservedObject var session: BrowserSession
+    @State private var scrollDebounceTask: Task<Void, Never>?
 
     var body: some View {
 
@@ -77,9 +78,17 @@ struct PaneBrowserView: View {
                                 }
                                 .onChange(of: geo.frame(in: .named("GridSpace")).minY) { _, minY in
                                     GridScrollOffset.contentMinY = minY
+                                    session.isScrolling = true
+                                    scrollDebounceTask?.cancel()
+                                    scrollDebounceTask = Task { @MainActor in
+                                        try? await Task.sleep(nanoseconds: 150_000_000)
+                                        guard !Task.isCancelled else { return }
+                                        session.isScrolling = false
+                                    }
                                 }
                         }
                     )
+                    .environment(\.isScrolling, session.isScrolling)
                 }
                 .coordinateSpace(name: "GridSpace")
                 .rubberBandSelection(

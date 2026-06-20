@@ -8,6 +8,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import QuickLookThumbnailing
+import CryptoKit
+import ImageIO
 
 enum SortOrder: String, CaseIterable {
     case name
@@ -25,22 +27,84 @@ struct FileItem: Identifiable, Hashable {
     let isLocal: Bool
 }
 
+extension String {
+    func sha256Hash() -> String {
+        let inputData = Data(self.utf8)
+        let hashed = SHA256.hash(data: inputData)
+        return hashed.compactMap { String(format: "%02x", $0) }.joined()
+    }
+}
+
+class ThumbnailDiskCache {
+    static let shared = ThumbnailDiskCache()
+    private let cacheDirectory: URL
+    
+    private init() {
+        let paths = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
+        let cachesDir = paths[0].appendingPathComponent("com.d13.xviewerSwift")
+        self.cacheDirectory = cachesDir.appendingPathComponent("Thumbnails")
+        try? FileManager.default.createDirectory(at: self.cacheDirectory, withIntermediateDirectories: true)
+    }
+    
+    private func cacheKey(for url: URL, modificationDate: Date, fileSize: Int64) -> String {
+        let path = url.standardizedFileURL.path
+        let modDate = modificationDate.timeIntervalSince1970
+        let compositeString = "\(path)_\(modDate)_\(fileSize)"
+        return compositeString.sha256Hash()
+    }
+    
+    func get(for url: URL, modificationDate: Date, fileSize: Int64) -> NSImage? {
+        let key = cacheKey(for: url, modificationDate: modificationDate, fileSize: fileSize)
+        let fileURL = cacheDirectory.appendingPathComponent(key)
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            return NSImage(contentsOf: fileURL)
+        }
+        return nil
+    }
+    
+    func set(_ image: NSImage, for url: URL, modificationDate: Date, fileSize: Int64) {
+        let key = cacheKey(for: url, modificationDate: modificationDate, fileSize: fileSize)
+        let fileURL = cacheDirectory.appendingPathComponent(key)
+        
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        guard let destination = CGImageDestinationCreateWithURL(fileURL as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else { return }
+        let options: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: 0.8
+        ]
+        CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
+        CGImageDestinationFinalize(destination)
+    }
+    
+    func clear() {
+        if let files = try? FileManager.default.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil) {
+            for file in files {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+    }
+}
+
 class ThumbnailLoader {
     static let shared = ThumbnailLoader()
     private var activeTasks = 0
     var maxTasks = 8
-    private var pendingContinuations: [(UUID, CheckedContinuation<Void, Never>)] = []
+    private var pendingContinuations: [(UUID, CheckedContinuation<Void, Error>)] = []
     private let lock = NSLock()
     
-    func wait() async {
+    func wait() async throws {
         let id = UUID()
-        await withTaskCancellationHandler {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 lock.lock()
+                if Task.isCancelled {
+                    lock.unlock()
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
                 if activeTasks < maxTasks {
                     activeTasks += 1
                     lock.unlock()
-                    continuation.resume()
+                    continuation.resume(returning: ())
                 } else {
                     pendingContinuations.append((id, continuation))
                     lock.unlock()
@@ -51,7 +115,7 @@ class ThumbnailLoader {
             if let index = pendingContinuations.firstIndex(where: { $0.0 == id }) {
                 let continuation = pendingContinuations.remove(at: index).1
                 lock.unlock()
-                continuation.resume()
+                continuation.resume(throwing: CancellationError())
             } else {
                 lock.unlock()
             }
@@ -66,7 +130,7 @@ class ThumbnailLoader {
             activeTasks += 1
             let continuation = pendingContinuations.removeFirst().1
             lock.unlock()
-            continuation.resume()
+            continuation.resume(returning: ())
         } else {
             lock.unlock()
         }
@@ -75,7 +139,7 @@ class ThumbnailLoader {
     func reset() {
         lock.lock()
         for (_, continuation) in pendingContinuations {
-            continuation.resume()
+            continuation.resume(throwing: CancellationError())
         }
         pendingContinuations.removeAll()
         activeTasks = 0
@@ -105,10 +169,15 @@ class ThumbnailCache {
 }
 
 struct FileItemView: View {
-    let url: URL
-    let isLocal: Bool
+    let item: FileItem
     @State private var thumbnail: NSImage?
-    
+    @Environment(\.isScrolling) private var isScrolling
+
+    private struct TaskID: Equatable {
+        let url: URL
+        let isScrolling: Bool
+    }
+
     var body: some View {
         Group {
             if let thumbnail = thumbnail {
@@ -122,7 +191,8 @@ struct FileItemView: View {
                 Color.gray.opacity(0.3)
                     .frame(width: 80, height: 80)
                     .cornerRadius(8)
-                    .task(id: url) {
+                    .task(id: TaskID(url: item.url, isScrolling: isScrolling)) {
+                        guard !isScrolling else { return }
                         await loadThumbnail()
                     }
             }
@@ -130,74 +200,120 @@ struct FileItemView: View {
     }
     
     private func loadThumbnail() async {
+        let url = item.url
+        let isLocal = item.isLocal
+        
+        // 1. FAST-PATH (Memory Cache)
         if let cached = ThumbnailCache.shared.get(for: url) {
             self.thumbnail = cached
             return
         }
         
-        await ThumbnailLoader.shared.wait()
-        defer {
-            ThumbnailLoader.shared.signal()
+        // 2. FAST-PATH (Local Disk Cache) - 100% offline, zero network requests
+        let diskCached = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+            if Task.isCancelled { return nil }
+            return ThumbnailDiskCache.shared.get(for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
+        }.value
+        
+        if Task.isCancelled { return }
+        
+        if let img = diskCached {
+            ThumbnailCache.shared.set(img, for: url)
+            self.thumbnail = img
+            return
+        }
+        
+        // 3. SLOW-PATH (Wait for scroll to end and fetch from network/generator)
+        // Remote volumes (SMB/NFS) need longer settle time to avoid thrashing on fast scroll
+        let debounceNs: UInt64 = isLocal ? 150_000_000 : 600_000_000
+        do {
+            try await Task.sleep(nanoseconds: debounceNs)
+        } catch {
+            return
         }
         
         if Task.isCancelled { return }
         
-        if let cached = ThumbnailCache.shared.get(for: url) {
-            self.thumbnail = cached
-            return
-        }
-        
-        if isLocal {
-            let img = await Task.detached(priority: .userInitiated) { () -> NSImage? in
-                let options: [CFString: Any] = [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 160
-                ]
-                if let imageSource = CGImageSourceCreateWithURL(self.url as CFURL, nil),
-                   let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
-                    return NSImage(cgImage: cgImage, size: .zero)
-                }
-                return nil
-            }.value
+        do {
+            try await ThumbnailLoader.shared.wait()
+            defer {
+                ThumbnailLoader.shared.signal()
+            }
             
-            if let img = img {
-                ThumbnailCache.shared.set(img, for: self.url)
-                self.thumbnail = img
+            if Task.isCancelled { return }
+            
+            // Check memory cache again in case another task loaded it while we were waiting
+            if let cached = ThumbnailCache.shared.get(for: url) {
+                self.thumbnail = cached
+                return
+            }
+            
+            if isLocal {
+                let loadTask = Task.detached(priority: .userInitiated) { () -> NSImage? in
+                    if Task.isCancelled { return nil }
+                    let options: [CFString: Any] = [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceThumbnailMaxPixelSize: 160,
+                        kCGImageSourceShouldCache: true
+                    ]
+                    guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+                    if Task.isCancelled { return nil }
+                    if let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
+                        return NSImage(cgImage: cgImage, size: .zero)
+                    }
+                    return nil
+                }
+                
+                let img = await withTaskCancellationHandler {
+                    await loadTask.value
+                } onCancel: {
+                    loadTask.cancel()
+                }
+                
+                if Task.isCancelled { return }
+                
+                if let img = img {
+                    ThumbnailCache.shared.set(img, for: url)
+                    Task.detached(priority: .background) {
+                        ThumbnailDiskCache.shared.set(img, for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
+                    }
+                    self.thumbnail = img
+                } else {
+                    await loadQuickLookThumbnail()
+                }
             } else {
                 await loadQuickLookThumbnail()
             }
-        } else {
-            // For network shares, QLThumbnailGenerator is preferred as it relies on Finder's
-            // daemon and cached icons instead of streaming full files over SMB.
-            await loadQuickLookThumbnail()
+        } catch {
+            // Cancelled while waiting for slot
         }
     }
     
     private func loadQuickLookThumbnail() async {
         let size = CGSize(width: 160, height: 160)
         let request = QLThumbnailGenerator.Request(
-            fileAt: url,
+            fileAt: item.url,
             size: size,
             scale: 2.0,
             representationTypes: .thumbnail
         )
         
         if let representation = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) {
-            ThumbnailCache.shared.set(representation.nsImage, for: self.url)
-            self.thumbnail = representation.nsImage
-        } else if !isLocal {
-            // Fast fallback for network shares if QuickLook fails: fetch system icon
-            // for the file type without streaming the file content over network.
-            let icon = await Task.detached(priority: .userInitiated) { () -> NSImage? in
-                let path = self.url.path
-                return NSWorkspace.shared.icon(forFile: path)
-            }.value
-            
-            if let icon = icon {
-                ThumbnailCache.shared.set(icon, for: self.url)
-                self.thumbnail = icon
+            let img = representation.nsImage
+            ThumbnailCache.shared.set(img, for: item.url)
+            Task.detached(priority: .background) {
+                ThumbnailDiskCache.shared.set(img, for: item.url, modificationDate: item.creationDate, fileSize: item.fileSize)
             }
+            self.thumbnail = img
+        } else if !item.isLocal {
+            let ext = item.url.pathExtension
+            let icon = NSWorkspace.shared.icon(forFileType: ext)
+            ThumbnailCache.shared.set(icon, for: item.url)
+            Task.detached(priority: .background) {
+                ThumbnailDiskCache.shared.set(icon, for: item.url, modificationDate: item.creationDate, fileSize: item.fileSize)
+            }
+            self.thumbnail = icon
         }
     }
 }
@@ -737,7 +853,7 @@ struct GridItemCell: View {
                     .frame(width: 50, height: 50)
                     .foregroundColor(.blue)
             } else {
-                FileItemView(url: item.url, isLocal: item.isLocal)
+                FileItemView(item: item)
             }
             Text(item.url.lastPathComponent)
                 .font(.caption)
@@ -872,6 +988,17 @@ enum GridLayout {
 
 enum GridScrollOffset {
     static var contentMinY: CGFloat = 0
+}
+
+private struct IsScrollingKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+extension EnvironmentValues {
+    var isScrolling: Bool {
+        get { self[IsScrollingKey.self] }
+        set { self[IsScrollingKey.self] = newValue }
+    }
 }
 
 
@@ -1067,6 +1194,7 @@ struct ContentView: View {
 
     private func clearApplicationMemory() {
         ThumbnailCache.shared.clear()
+        ThumbnailDiskCache.shared.clear()
         ThumbnailLoader.shared.reset()
         session.clearMemory()
         if isSplitViewEnabled {

@@ -13,6 +13,9 @@ class BrowserSession: ObservableObject {
     @Published var currentSortOrder: SortOrder = .name
     @Published var metadataString: String = ""
     @Published var otherFileCount: Int = 0
+    @Published var isScrolling: Bool = false
+
+    private var loadTask: Task<Void, Never>?
 
     @Published var isShowingProperties = false
     @Published var propertiesURL: URL?
@@ -343,32 +346,47 @@ func copySelectedItemToClipboard() {
             return
         }
         
-        var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-            self.metadataString = "Folder: \(url.lastPathComponent)"
-            return
-        }
-        
         let name = url.lastPathComponent
-        var sizeStr = "Unknown Size"
-        if let attr = try? FileManager.default.attributesOfItem(atPath: url.path), let size = attr[.size] as? Int64 {
-            let formatter = ByteCountFormatter()
-            formatter.allowedUnits = [.useMB, .useKB, .useBytes]
-            formatter.countStyle = .file
-            sizeStr = formatter.string(fromByteCount: size)
-        }
+        self.metadataString = "\(name)  |  Loading..."
         
-        var dimensionsStr = ""
-        if let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
-           let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any] {
-            let width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
-            let height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
-            if width > 0 && height > 0 {
-                dimensionsStr = " - \(width) x \(height)"
+        Task.detached(priority: .userInitiated) {
+            let isAccessed = url.startAccessingSecurityScopedResource()
+            defer { if isAccessed { url.stopAccessingSecurityScopedResource() } }
+            
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                await MainActor.run {
+                    guard self.activeItemURL == url || (self.activeItemURL == nil && self.currentFolderURL == url) else { return }
+                    self.metadataString = "Folder: \(name)"
+                }
+                return
+            }
+            
+            var sizeStr = "Unknown Size"
+            if let attr = try? FileManager.default.attributesOfItem(atPath: url.path), let size = attr[.size] as? Int64 {
+                let formatter = ByteCountFormatter()
+                formatter.allowedUnits = [.useMB, .useKB, .useBytes]
+                formatter.countStyle = .file
+                sizeStr = formatter.string(fromByteCount: size)
+            }
+            
+            var dimensionsStr = ""
+            if let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
+               let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any] {
+                let width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
+                let height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
+                if width > 0 && height > 0 {
+                    dimensionsStr = " - \(width) x \(height)"
+                }
+            }
+            
+            let finalMetadata = "\(name)  |  \(sizeStr)\(dimensionsStr)"
+            
+            await MainActor.run {
+                guard self.activeItemURL == url || (self.activeItemURL == nil && self.currentFolderURL == url) else { return }
+                self.metadataString = finalMetadata
             }
         }
-        
-        self.metadataString = "\(name)  |  \(sizeStr)\(dimensionsStr)"
     }
     
     func createNewFolderWithSelection() {
@@ -855,15 +873,17 @@ func copySelectedItemToClipboard() {
     }
     
     func loadFolder(url: URL, sidebarManager: SidebarManager?) {
+        loadTask?.cancel()
+
         sidebarManager?.recordRecentVisit(url: url)
         if let current = self.currentFolderURL, let active = self.activeItemURL {
             folderHistory[current] = active
         }
-        
+
         self.currentFolderURL = url
         self.folderContents = []
         self.otherFileCount = 0
-        
+
         if let savedActive = folderHistory[url] {
             self.activeItemURL = savedActive
             self.selectedItemURLs = [savedActive]
@@ -871,44 +891,51 @@ func copySelectedItemToClipboard() {
             self.activeItemURL = nil
             self.selectedItemURLs = []
         }
-        
+
         var isLocalFolder = true
         if let resourceValues = try? url.resourceValues(forKeys: [.volumeIsLocalKey]),
            let local = resourceValues.volumeIsLocal {
             isLocalFolder = local
         }
         ThumbnailLoader.shared.maxTasks = isLocalFolder ? 8 : 2
-        
-        DispatchQueue.global(qos: .userInitiated).async {
+
+        loadTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+
             let keys: [URLResourceKey] = [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey]
             guard let fileURLs = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
-                DispatchQueue.main.async {
+                if Task.isCancelled { return }
+                await MainActor.run {
                     guard self.currentFolderURL == url else { return }
                     self.folderContents = []
                 }
                 return
             }
-            
+
+            if Task.isCancelled { return }
+
             var batch: [FileItem] = []
             var allItems: [FileItem] = []
             let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "webp"]
             var otherCountLocal = 0
-            
+
             for fileURL in fileURLs {
+                if Task.isCancelled { return }
+
                 var isDirectory = false
                 var fileDate = Date.distantPast
                 var fileSize: Int64 = 0
                 var isLocal = true
-                
+
                 if let resourceValues = try? fileURL.resourceValues(forKeys: Set(keys)) {
                     isDirectory = resourceValues.isDirectory ?? false
                     fileDate = resourceValues.creationDate ?? Date.distantPast
                     fileSize = Int64(resourceValues.fileSize ?? 0)
                     isLocal = resourceValues.volumeIsLocal ?? true
                 }
-                
+
                 let fileName = fileURL.lastPathComponent
-                
+
                 if !isDirectory {
                     let ext = fileURL.pathExtension.lowercased()
                     if imageExtensions.contains(ext) {
@@ -919,29 +946,35 @@ func copySelectedItemToClipboard() {
                 } else {
                     batch.append(FileItem(url: fileURL, name: fileName, isDirectory: true, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
                 }
-                
+
                 if batch.count >= 100 {
                     allItems.append(contentsOf: batch)
                     batch.removeAll(keepingCapacity: true)
-                    
-                    let currentItems = allItems // Unsorted preview
-                    
-                    DispatchQueue.main.async {
+
+                    if Task.isCancelled { return }
+
+                    let snapshot = allItems
+                    let countSnapshot = otherCountLocal
+                    await MainActor.run {
                         guard self.currentFolderURL == url else { return }
-                        self.folderContents = currentItems
-                        self.otherFileCount = otherCountLocal
+                        self.folderContents = snapshot
+                        self.otherFileCount = countSnapshot
                         if self.activeItemURL == nil {
-                            if let u = currentItems.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
+                            if let u = snapshot.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
                         }
                     }
                 }
             }
-            
+
+            if Task.isCancelled { return }
+
             allItems.append(contentsOf: batch)
             if !allItems.isEmpty {
-                let sortedItems = self.sortItems(allItems)
-                
-                DispatchQueue.main.async {
+                let sortedItems = await MainActor.run { self.sortItems(allItems) }
+
+                if Task.isCancelled { return }
+
+                await MainActor.run {
                     guard self.currentFolderURL == url else { return }
                     self.folderContents = sortedItems
                     self.otherFileCount = otherCountLocal
@@ -950,7 +983,7 @@ func copySelectedItemToClipboard() {
                     }
                 }
             } else {
-                DispatchQueue.main.async {
+                await MainActor.run {
                     guard self.currentFolderURL == url else { return }
                     self.folderContents = []
                     self.otherFileCount = otherCountLocal

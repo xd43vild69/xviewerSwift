@@ -1,11 +1,10 @@
 🔴 
 
-un filtro por nombre para cada panel
+
 
 cuando presione una tecla sola como s o a del teclado debe posicionarse en la carpeta que contenga esta letra inicialmente, del panel activo
 
 ---
-
 
 
 10. **Etiquetas o Clasificación:** Poder ponerles estrellas (del 1 al 5) o etiquetas de colores tipo Finder a las imágenes para organizarlas mejor.
