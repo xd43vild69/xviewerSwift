@@ -64,6 +64,9 @@ struct PaneBrowserView: View {
                                 performDropAction: { destinationURL in
                                     let urlsToMove = Array(session.selectedItemURLs)
                                     session.moveFiles(urls: urlsToMove, to: destinationURL)
+                                },
+                                updateSelectionAnchorAction: { url in
+                                    session.updateSelectionAnchor(url)
                                 }
                             )
                             .id(item.url)

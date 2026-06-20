@@ -83,6 +83,13 @@ class BrowserSession: ObservableObject {
     /// (incluyendo Enter key y navegar a carpeta padre, que antes no registraban).
     weak var sidebarManager: SidebarManager?
 
+    /// Range selection state: tracks anchor point for Shift+Arrow deselection (Finder-style)
+    var selectionAnchorURL: URL?
+    var selectionAnchorIndex: Int?
+    /// Selection that existed when the anchor was set (e.g. Ctrl+Click disjunct sets).
+    /// Each Shift+Arrow computes `base ∪ range` so contracting the range deselects correctly.
+    var selectionBaseURLs: Set<URL> = []
+
     private var loadTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
 
@@ -837,6 +844,7 @@ func copySelectedItemToClipboard() {
             if let url = self.folderContents.first?.url {
                 self.activeItemURL = url
                 self.selectedItemURLs = [url]
+                updateSelectionAnchor(url)
             }
             return
         }
@@ -849,13 +857,25 @@ func copySelectedItemToClipboard() {
         } else if newIndex >= self.folderContents.count {
             targetURL = self.folderContents.last?.url
         }
-        
+
         if let newURL = targetURL {
             self.activeItemURL = newURL
             if shift {
-                self.selectedItemURLs.insert(newURL)
+                // Range selection with anchor (Finder-style)
+                if selectionAnchorURL == nil {
+                    updateSelectionAnchor(currentSelected)
+                }
+                if let anchorIdx = selectionAnchorIndex,
+                   let newIdx = self.folderContents.firstIndex(where: { $0.url == newURL }) {
+                    let rangeItems = computeSelectionRange(from: anchorIdx, to: newIdx)
+                    // base ∪ range: contracting the range deselects items outside it,
+                    // while preserving Ctrl+Click selections captured in the base.
+                    selectedItemURLs = selectionBaseURLs.union(rangeItems)
+                }
             } else {
+                // No shift: single selection + reset anchor
                 self.selectedItemURLs = [newURL]
+                updateSelectionAnchor(newURL)
             }
         }
     }
@@ -866,6 +886,7 @@ func copySelectedItemToClipboard() {
             if let url = self.folderContents.first?.url {
                 self.activeItemURL = url
                 self.selectedItemURLs = [url]
+                updateSelectionAnchor(url)
             }
             return
         }
@@ -874,9 +895,21 @@ func copySelectedItemToClipboard() {
             let newURL = self.folderContents[newIndex].url
             self.activeItemURL = newURL
             if shift {
-                self.selectedItemURLs.insert(newURL)
+                // Range selection with anchor (Finder-style)
+                if selectionAnchorURL == nil {
+                    updateSelectionAnchor(currentSelected)
+                }
+                if let anchorIdx = selectionAnchorIndex,
+                   let newIdx = self.folderContents.firstIndex(where: { $0.url == newURL }) {
+                    let rangeItems = computeSelectionRange(from: anchorIdx, to: newIdx)
+                    // base ∪ range: contracting the range deselects items outside it,
+                    // while preserving Ctrl+Click selections captured in the base.
+                    selectedItemURLs = selectionBaseURLs.union(rangeItems)
+                }
             } else {
+                // No shift: single selection + reset anchor
                 self.selectedItemURLs = [newURL]
+                updateSelectionAnchor(newURL)
             }
         }
     }
@@ -1149,6 +1182,21 @@ func copySelectedItemToClipboard() {
             num += 1
         }
         return num
+    }
+
+    // MARK: - Range Selection (Shift+Arrow with deselection)
+
+    func updateSelectionAnchor(_ url: URL) {
+        self.selectionAnchorURL = url
+        self.selectionAnchorIndex = self.folderContents.firstIndex(where: { $0.url == url })
+        // Capture the current selection as the base for upcoming Shift+Arrow extensions.
+        self.selectionBaseURLs = self.selectedItemURLs
+    }
+
+    func computeSelectionRange(from anchorIndex: Int, to newIndex: Int) -> Set<URL> {
+        let start = min(anchorIndex, newIndex)
+        let end = max(anchorIndex, newIndex)
+        return Set(folderContents[start...end].map { $0.url })
     }
 
 }

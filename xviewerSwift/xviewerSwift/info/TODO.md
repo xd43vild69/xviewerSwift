@@ -1,7 +1,9 @@
 🔴  ---
 
 
-cuando estoy se
+cuando estoy en un panel activo y cambio el nombre de un archivo quiero que el foco al terminar la accion pase al archivo anterior y si no hay uno anterior al siguiente
+
+cuando muevo un archivo en un panel activo, debe quedar en foco el archivo anterior en el panel activo o el siguiente en caso que no exista el anterior o ninguno si no hay mas archivos
 
 
 10. **Etiquetas o Clasificación:** Poder ponerles estrellas (del 1 al 5) o etiquetas de colores tipo Finder a las imágenes para organizarlas mejor.

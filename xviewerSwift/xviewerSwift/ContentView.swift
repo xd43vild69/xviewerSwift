@@ -791,6 +791,7 @@ struct GridItemCell: View {
     let toggleBookmarkAction: () -> Void
     let isSingleSelection: Bool
     let performDropAction: (URL) -> Void
+    let updateSelectionAnchorAction: (URL) -> Void
 
     @State private var isTargeted: Bool = false
     
@@ -840,6 +841,7 @@ struct GridItemCell: View {
                 selectedItemURLs = [item.url]
             }
             activeItemURL = item.url
+            updateSelectionAnchorAction(item.url)
         }
         .frame(maxWidth: .infinity)
         .frame(height: GridLayout.cellHeight)
