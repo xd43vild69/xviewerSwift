@@ -1163,7 +1163,7 @@ struct ContentView: View {
                 if let url = activeSession().activeItemURL ?? activeSession().currentFolderURL {
                     Text(url.path)
                         .font(.system(size: 11))
-                        .foregroundColor(activePane == .left ? .red : .blue)
+                        .foregroundColor(activePane == .left ? .white : .blue)
                         .lineLimit(1)
                         .truncationMode(.head)
                         .onHover { isHovering in
