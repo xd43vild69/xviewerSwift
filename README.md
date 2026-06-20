@@ -53,5 +53,57 @@
 ## Architecture
 Built entirely with Swift and SwiftUI, focusing on concurrency (`async`/`await`) for non-blocking file I/O and thumbnail generation. Security-scoped URL handling ensures safe access to system directories chosen by the user.
 
+### 3-Layer Clean Architecture
+
+The app is structured to strictly separate UI from business logic and data:
+
+1. **Models:** Pure data structures (`FileItem`, `SidebarFolderItem`, Thumbnail cache) with no business logic.
+2. **Core Services:** The intelligence of the app, built as `@MainActor ObservableObjects`.
+   - **`BrowserSession`** ⭐: The core engine handling folder contents, active selection, and all file operations (copy, move, delete, rename). Two instances exist independently for the left and right panes.
+   - **`SidebarManager`**: Manages sources, bookmarks, and recently visited folders, persisting state to `UserDefaults`.
+   - **`ThumbnailLoader`**: A concurrency semaphore that manages image loading (8 local slots, 2 remote).
+3. **View Layer:** Pure UI that observes the core services.
+   - `ContentView` routes keyboard actions and manages the dual-pane layout.
+   - `BrowserSession` strictly handles file operations and does not know about the UI; `ContentView` does not know about `FileManager`. Each layer has a single, distinct responsibility.
+
+```mermaid
+flowchart TB
+    classDef model fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
+    classDef core fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#1565c0
+    classDef view fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#2e7d32
+    classDef external fill:#eceff1,stroke:#607d8b,stroke-width:2px,color:#37474f
+
+    subgraph Layer_View ["🖼️ View Layer (UI Pura)"]
+        direction TB
+        ContentView["ContentView"]:::view
+        PaneBrowserView["PaneBrowserView"]:::view
+        SecondaryViews["Sidebar & Fullscreen"]:::view
+        ContentView --> PaneBrowserView
+        ContentView --> SecondaryViews
+    end
+
+    subgraph Layer_Core ["🧠 Core Services (@MainActor)"]
+        direction TB
+        BrowserSession["⭐ BrowserSession (x2)"]:::core
+        SidebarManager["SidebarManager"]:::core
+        ThumbnailLoader["ThumbnailLoader"]:::core
+    end
+
+    subgraph Layer_Models ["📦 Models (Datos)"]
+        direction TB
+        FileItem["FileItem"]:::model
+        SidebarFolderItem["SidebarFolderItem"]:::model
+    end
+    
+    FileManager((🗂️ FileManager)):::external
+    User((👤 Usuario)):::external
+
+    User == "Interactúa" ==> ContentView
+    ContentView -- "Obtiene session activa\ny llama métodos" --> BrowserSession
+    BrowserSession -. "@Published actualiza" .-> Layer_View
+    BrowserSession -- "Operaciones de archivos\n(security-scoped URLs)" --> FileManager
+    FileManager -- "Actualiza modelo" --> FileItem
+```
+
 ---
 *Developed with a focus on speed, utility, and native macOS aesthetics.*
