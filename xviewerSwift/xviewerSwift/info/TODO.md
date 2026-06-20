@@ -1,5 +1,16 @@
 🔴 
 
+
+cuando la carpeta halla sido abierta desde recientes y navego hacia arriba, debe llevarme arriba en el path, no retornar a la nada
+actualmente cuando una carpeta es inicializada desde recientes no tiene padre y se pierde el ir arriba, en este caso debe identificar con su path y desplazarse una carpeta arriba, para tener una navegacion mas amigable
+
+ctrl + n = create a new folder
+    
+
+---
+
+
+
 10. **Etiquetas o Clasificación:** Poder ponerles estrellas (del 1 al 5) o etiquetas de colores tipo Finder a las imágenes para organizarlas mejor.
 
 
