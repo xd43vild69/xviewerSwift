@@ -2,6 +2,70 @@ import SwiftUI
 import UniformTypeIdentifiers
 import QuickLookThumbnailing
 
+// MARK: - Thumbnail Loader (Per-Pane Semaphore)
+class ThumbnailLoader {
+    static let shared = ThumbnailLoader()
+    private var activeTasks = 0
+    var maxTasks = 8
+    private var pendingContinuations: [(UUID, CheckedContinuation<Void, Error>)] = []
+    private let lock = NSLock()
+
+    func wait() async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                lock.lock()
+                if Task.isCancelled {
+                    lock.unlock()
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                if activeTasks < maxTasks {
+                    activeTasks += 1
+                    lock.unlock()
+                    continuation.resume(returning: ())
+                } else {
+                    pendingContinuations.append((id, continuation))
+                    lock.unlock()
+                }
+            }
+        } onCancel: {
+            lock.lock()
+            if let index = pendingContinuations.firstIndex(where: { $0.0 == id }) {
+                let continuation = pendingContinuations.remove(at: index).1
+                lock.unlock()
+                continuation.resume(throwing: CancellationError())
+            } else {
+                lock.unlock()
+            }
+        }
+    }
+
+    func signal() {
+        lock.lock()
+        activeTasks -= 1
+
+        if !pendingContinuations.isEmpty && activeTasks < maxTasks {
+            activeTasks += 1
+            let continuation = pendingContinuations.removeFirst().1
+            lock.unlock()
+            continuation.resume(returning: ())
+        } else {
+            lock.unlock()
+        }
+    }
+
+    func reset() {
+        lock.lock()
+        for (_, continuation) in pendingContinuations {
+            continuation.resume(throwing: CancellationError())
+        }
+        pendingContinuations.removeAll()
+        activeTasks = 0
+        lock.unlock()
+    }
+}
+
 @MainActor
 class BrowserSession: ObservableObject {
     @Published var currentColumnCount: Int = 1
@@ -17,6 +81,8 @@ class BrowserSession: ObservableObject {
 
     private var loadTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
+
+    lazy var thumbnailLoader: ThumbnailLoader = ThumbnailLoader()
 
     @Published var isShowingProperties = false
     @Published var propertiesURL: URL?
@@ -920,7 +986,7 @@ func copySelectedItemToClipboard() {
            let local = resourceValues.volumeIsLocal {
             isLocalFolder = local
         }
-        ThumbnailLoader.shared.maxTasks = isLocalFolder ? 8 : 2
+        thumbnailLoader.maxTasks = isLocalFolder ? 24 : 2
 
         loadTask = Task.detached(priority: .userInitiated) { [weak self, isLocalFolder] in
             guard let self else { return }

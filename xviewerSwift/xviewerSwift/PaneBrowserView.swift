@@ -69,6 +69,7 @@ struct PaneBrowserView: View {
                             .id(item.url)
                         }
                     }
+                    .environment(\.thumbnailLoader, session.thumbnailLoader)
                     .padding(GridLayout.padding)
                     .background(
                         GeometryReader { geo in

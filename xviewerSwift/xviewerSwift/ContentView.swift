@@ -11,6 +11,18 @@ import QuickLookThumbnailing
 import CryptoKit
 import ImageIO
 
+// MARK: - Environment Key for Per-Pane ThumbnailLoader
+private struct ThumbnailLoaderKey: EnvironmentKey {
+    static let defaultValue: ThumbnailLoader = ThumbnailLoader.shared
+}
+
+extension EnvironmentValues {
+    var thumbnailLoader: ThumbnailLoader {
+        get { self[ThumbnailLoaderKey.self] }
+        set { self[ThumbnailLoaderKey.self] = newValue }
+    }
+}
+
 enum SortOrder: String, CaseIterable {
     case name
     case date
@@ -84,69 +96,6 @@ class ThumbnailDiskCache {
     }
 }
 
-class ThumbnailLoader {
-    static let shared = ThumbnailLoader()
-    private var activeTasks = 0
-    var maxTasks = 8
-    private var pendingContinuations: [(UUID, CheckedContinuation<Void, Error>)] = []
-    private let lock = NSLock()
-    
-    func wait() async throws {
-        let id = UUID()
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                lock.lock()
-                if Task.isCancelled {
-                    lock.unlock()
-                    continuation.resume(throwing: CancellationError())
-                    return
-                }
-                if activeTasks < maxTasks {
-                    activeTasks += 1
-                    lock.unlock()
-                    continuation.resume(returning: ())
-                } else {
-                    pendingContinuations.append((id, continuation))
-                    lock.unlock()
-                }
-            }
-        } onCancel: {
-            lock.lock()
-            if let index = pendingContinuations.firstIndex(where: { $0.0 == id }) {
-                let continuation = pendingContinuations.remove(at: index).1
-                lock.unlock()
-                continuation.resume(throwing: CancellationError())
-            } else {
-                lock.unlock()
-            }
-        }
-    }
-    
-    func signal() {
-        lock.lock()
-        activeTasks -= 1
-        
-        if !pendingContinuations.isEmpty && activeTasks < maxTasks {
-            activeTasks += 1
-            let continuation = pendingContinuations.removeFirst().1
-            lock.unlock()
-            continuation.resume(returning: ())
-        } else {
-            lock.unlock()
-        }
-    }
-    
-    func reset() {
-        lock.lock()
-        for (_, continuation) in pendingContinuations {
-            continuation.resume(throwing: CancellationError())
-        }
-        pendingContinuations.removeAll()
-        activeTasks = 0
-        lock.unlock()
-    }
-}
-
 class ThumbnailCache {
     static let shared = ThumbnailCache()
     private let cache = NSCache<NSURL, NSImage>()
@@ -172,6 +121,7 @@ struct FileItemView: View {
     let item: FileItem
     @State private var thumbnail: NSImage?
     @Environment(\.isScrolling) private var isScrolling
+    @Environment(\.thumbnailLoader) private var thumbnailLoader
 
     private struct TaskID: Equatable {
         let url: URL
@@ -235,9 +185,9 @@ struct FileItemView: View {
         if Task.isCancelled { return }
         
         do {
-            try await ThumbnailLoader.shared.wait()
+            try await thumbnailLoader.wait()
             defer {
-                ThumbnailLoader.shared.signal()
+                thumbnailLoader.signal()
             }
             
             if Task.isCancelled { return }
@@ -1201,6 +1151,8 @@ struct ContentView: View {
         ThumbnailCache.shared.clear()
         ThumbnailDiskCache.shared.clear()
         ThumbnailLoader.shared.reset()
+        session.thumbnailLoader.reset()
+        sessionRight.thumbnailLoader.reset()
         session.clearMemory()
         if isSplitViewEnabled {
             sessionRight.clearMemory()
