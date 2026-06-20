@@ -320,11 +320,13 @@ class ZoomState: ObservableObject {
     @Published var totalZoom: CGFloat = 1.0
     @Published var currentOffset: CGSize = .zero
     @Published var totalOffset: CGSize = .zero
+    @Published var rotationAngle: Double = 0.0
     
-    private var monitor: Any?
+    private var scrollMonitor: Any?
+    private var keyMonitor: Any?
     
     init() {
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             guard let self = self else { return event }
             if self.totalZoom > 1.0 {
                 DispatchQueue.main.async {
@@ -335,10 +337,28 @@ class ZoomState: ObservableObject {
             }
             return event
         }
+        
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            let isCommandOnly = event.modifierFlags.contains(.command) && !event.modifierFlags.contains(.shift) && !event.modifierFlags.contains(.option) && !event.modifierFlags.contains(.control)
+            if isCommandOnly {
+                if event.keyCode == 123 { // Left arrow
+                    DispatchQueue.main.async { self.rotationAngle -= 90.0 }
+                    return nil
+                } else if event.keyCode == 124 { // Right arrow
+                    DispatchQueue.main.async { self.rotationAngle += 90.0 }
+                    return nil
+                }
+            }
+            return event
+        }
     }
     
     deinit {
-        if let monitor = monitor {
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = keyMonitor {
             NSEvent.removeMonitor(monitor)
         }
     }
@@ -348,6 +368,9 @@ class ZoomState: ObservableObject {
         currentZoom = 0.0
         totalOffset = .zero
         currentOffset = .zero
+        withAnimation(nil) {
+            rotationAngle = 0.0
+        }
     }
 }
 
@@ -360,7 +383,6 @@ struct FullScreenImageView: View {
     @State private var isInverted = false
     @State private var isBlackAndWhite = false
     @State private var isFlippedHorizontal = false
-    @State private var rotationAngle: Double = 0.0
     @StateObject private var zoomState = ZoomState()
     @State private var showUI: Bool = true
     @State private var notificationMessage: String? = nil
@@ -396,8 +418,8 @@ struct FullScreenImageView: View {
                     }
                 }
                     .scaleEffect(x: isFlippedHorizontal ? -1 : 1, y: 1)
-                    .rotationEffect(.degrees(rotationAngle), anchor: .center)
-                    .animation(.easeInOut(duration: 0.2), value: rotationAngle)
+                    .rotationEffect(.degrees(zoomState.rotationAngle), anchor: .center)
+                    .animation(.easeInOut(duration: 0.2), value: zoomState.rotationAngle)
                     .padding()
                     .scaleEffect(max(0.1, zoomState.totalZoom + zoomState.currentZoom))
                     .offset(x: zoomState.totalOffset.width + zoomState.currentOffset.width, y: zoomState.totalOffset.height + zoomState.currentOffset.height)
@@ -447,8 +469,8 @@ struct FullScreenImageView: View {
                     HStack {
                         Spacer()
                         Button(action: { 
-                            if rotationAngle != 0.0 {
-                                withAnimation(nil) { rotationAngle = 0.0 }
+                            if zoomState.rotationAngle != 0.0 {
+                                withAnimation(nil) { zoomState.rotationAngle = 0.0 }
                             } else {
                                 onClose() 
                             }
@@ -503,15 +525,7 @@ struct FullScreenImageView: View {
                 .keyboardShortcut(.downArrow, modifiers: [])
                 .opacity(0)
                 
-            Button(action: { rotationAngle -= 90.0 }) { Text("") }
-                .keyboardShortcut(.leftArrow, modifiers: [.command])
-                .opacity(0)
-
-            Button(action: { rotationAngle += 90.0 }) { Text("") }
-                .keyboardShortcut(.rightArrow, modifiers: [.command])
-                .opacity(0)
-
-            Button(action: { withAnimation(nil) { rotationAngle = 0.0 } }) { Text("") }
+            Button(action: { withAnimation(nil) { zoomState.rotationAngle = 0.0 } }) { Text("") }
                 .keyboardShortcut(.delete, modifiers: [])
                 .opacity(0)
                 
@@ -555,7 +569,6 @@ struct FullScreenImageView: View {
         .onChange(of: url) { oldURL, newURL in
             nsImage = nil
             zoomState.reset()
-            withAnimation(nil) { rotationAngle = 0.0 }
             loadImage(from: newURL)
         }
     }
@@ -1099,11 +1112,15 @@ struct ContentView: View {
                             activeSession().navigateUp()
                             return nil
                         } else if event.keyCode == 123 { // Left arrow
-                            activeSession().goBack()
-                            return nil
+                            if activeSession().fullScreenImageURL == nil {
+                                activeSession().goBack()
+                                return nil
+                            }
                         } else if event.keyCode == 124 { // Right arrow
-                            activeSession().goForward()
-                            return nil
+                            if activeSession().fullScreenImageURL == nil {
+                                activeSession().goForward()
+                                return nil
+                            }
                         }
                     }
                 }
