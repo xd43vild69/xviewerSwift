@@ -300,6 +300,7 @@ struct FullScreenImageView: View {
     @State private var nsImage: NSImage?
     @State private var isInverted = false
     @State private var isBlackAndWhite = false
+    @State private var isFlippedHorizontal = false
     @State private var rotationAngle: Double = 0.0
     @StateObject private var zoomState = ZoomState()
     @State private var showUI: Bool = true
@@ -335,6 +336,7 @@ struct FullScreenImageView: View {
                             .scaledToFit()
                     }
                 }
+                    .scaleEffect(x: isFlippedHorizontal ? -1 : 1, y: 1)
                     .rotationEffect(.degrees(rotationAngle), anchor: .center)
                     .animation(.easeInOut(duration: 0.2), value: rotationAngle)
                     .padding()
@@ -456,6 +458,10 @@ struct FullScreenImageView: View {
                 
             Button(action: { isInverted.toggle() }) { Text("") }
                 .keyboardShortcut("i", modifiers: [.command])
+                .opacity(0)
+                
+            Button(action: { isFlippedHorizontal.toggle() }) { Text("") }
+                .keyboardShortcut("h", modifiers: [.command])
                 .opacity(0)
                 
             Button(action: { isBlackAndWhite.toggle() }) { Text("") }

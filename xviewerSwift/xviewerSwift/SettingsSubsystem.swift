@@ -131,6 +131,7 @@ struct SettingsView: View {
                 ShortcutRow(action: "Open Selected", key: "Enter / Space")
                 ShortcutRow(action: "Toggle Favorite", key: "Cmd + M")
                 ShortcutRow(action: "Invert Image Colors", key: "Cmd + I")
+                ShortcutRow(action: "Flip Image Horizontal", key: "Cmd + H")
                 ShortcutRow(action: "Black & White Image", key: "Cmd + B")
                 ShortcutRow(action: "Rotate Image Left", key: "Cmd + Left Arrow")
                 ShortcutRow(action: "Rotate Image Right", key: "Cmd + Right Arrow")
