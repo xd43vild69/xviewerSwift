@@ -1041,6 +1041,14 @@ struct ContentView: View {
                         activeSession().handleUpArrow(shift: shiftPressed)
                         return nil
                     default:
+                        if let chars = event.charactersIgnoringModifiers, chars.count == 1 {
+                            let char = chars.lowercased()
+                            let allowedCharacterSet = CharacterSet.letters.union(.decimalDigits)
+                            if char.rangeOfCharacter(from: allowedCharacterSet) != nil {
+                                activeSession().jumpToFirstItem(startingWith: char)
+                                return nil
+                            }
+                        }
                         break
                     }
                 }

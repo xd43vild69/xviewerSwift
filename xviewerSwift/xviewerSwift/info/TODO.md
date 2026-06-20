@@ -1,7 +1,8 @@
 🔴 
 
+un filtro por nombre para cada panel
 
-    
+cuando presione una tecla sola como s o a del teclado debe posicionarse en la carpeta que contenga esta letra inicialmente, del panel activo
 
 ---
 

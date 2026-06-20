@@ -136,6 +136,41 @@ func copySelectedItemToClipboard() {
         self.selectedItemURLs = Set(self.folderContents.filter { !$0.isDirectory }.map { $0.url })
     }
     
+    func jumpToFirstItem(startingWith character: String) {
+        guard !folderContents.isEmpty else { return }
+        let prefix = character.lowercased()
+        
+        let currentIndex = folderContents.firstIndex { $0.url == activeItemURL } ?? -1
+        var searchStartIndex = 0
+        
+        if currentIndex >= 0 {
+            let currentItemName = folderContents[currentIndex].name.lowercased()
+            if currentItemName.hasPrefix(prefix) {
+                searchStartIndex = currentIndex + 1
+            }
+        }
+        
+        for i in searchStartIndex..<folderContents.count {
+            if folderContents[i].name.lowercased().hasPrefix(prefix) {
+                let match = folderContents[i]
+                self.activeItemURL = match.url
+                self.selectedItemURLs = [match.url]
+                return
+            }
+        }
+        
+        if searchStartIndex > 0 {
+            for i in 0...currentIndex {
+                if folderContents[i].name.lowercased().hasPrefix(prefix) {
+                    let match = folderContents[i]
+                    self.activeItemURL = match.url
+                    self.selectedItemURLs = [match.url]
+                    return
+                }
+            }
+        }
+    }
+    
     func deleteSelectedItem() {
         var targets = self.selectedItemURLs
         if let fsURL = self.fullScreenImageURL { targets.insert(fsURL) }
