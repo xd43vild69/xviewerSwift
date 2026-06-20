@@ -1065,7 +1065,7 @@ struct ContentView: View {
         if isSplitViewEnabled {
             sessionRight.clearMemory()
         }
-        activeSession().showNotification("🧹 Memoria y caché liberadas")
+        activeSession().showNotification("🧹 Free memory")
     }
 
     private var shortcutsGroup: some View {

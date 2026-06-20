@@ -31,7 +31,13 @@
   - **Bookmarks:** Pin your favorite or frequently accessed folders for immediate access.
   - **Recents:** Automatically tracks and dynamically sorts recently visited folders based on frequency of use.
 - **Flexible Sorting:** Sort folder contents by Name, Date, or Size.
-- **Deep Keyboard Integration:** Navigate grids and menus instantly using Arrow keys, and use system-standard shortcuts (`Cmd+Backspace` to delete, `Esc` to close).
+- **Deep Keyboard Integration:**
+  - Navigate grids and menus instantly using **Arrow keys**.
+  - Jump directly to the first or last image using `Cmd + Shift + Up Arrow` and `Cmd + Shift + Down Arrow`.
+  - Go up a directory using `Cmd + Up Arrow`.
+  - Create a new folder quickly with `Cmd + Shift + N`.
+  - Delete items using `Cmd + Backspace` or `Delete`.
+  - Return to grid view or close modals with `Esc`.
 
 ### 🔍 Detailed File Properties
 - **Properties Panel:** View detailed metadata about selected files, including file dimensions, accurate file size, and creation/modification timestamps.
