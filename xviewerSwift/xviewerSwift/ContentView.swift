@@ -117,6 +117,41 @@ class ThumbnailCache {
     }
 }
 
+// MARK: - GIF Animation Support
+struct GIFFrame {
+    let cgImage: CGImage
+    let duration: Double
+}
+
+class GIFAnimator {
+    static func isGIF(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ext == "gif"
+    }
+
+    static func extractFrames(from url: URL) -> [GIFFrame]? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+
+        let frameCount = CGImageSourceGetCount(source)
+        var frames: [GIFFrame] = []
+
+        for i in 0..<frameCount {
+            guard let cgImage = CGImageSourceCreateImageAtIndex(source, i, nil) else { continue }
+
+            var duration: Double = 0.1 // Default 100ms
+            if let properties = CGImageSourceCopyPropertiesAtIndex(source, i, nil) as? [String: Any],
+               let gifDict = properties[kCGImagePropertyGIFDictionary as String] as? [String: Any],
+               let delayTime = gifDict[kCGImagePropertyGIFDelayTime as String] as? NSNumber {
+                duration = max(0.01, delayTime.doubleValue) // Min 10ms, GIF times are in seconds
+            }
+
+            frames.append(GIFFrame(cgImage: cgImage, duration: duration))
+        }
+
+        return frames.isEmpty ? nil : frames
+    }
+}
+
 struct FileItemView: View {
     let item: FileItem
     @State private var thumbnail: NSImage?
@@ -378,8 +413,11 @@ struct FullScreenImageView: View {
     let url: URL
     let onClose: () -> Void
     let navigateImage: (Int) -> Void
-    
+
     @State private var nsImage: NSImage?
+    @State private var gifFrames: [GIFFrame]?
+    @State private var currentFrameIndex: Int = 0
+    @State private var animationTimer: Timer?
     @State private var isInverted = false
     @State private var isBlackAndWhite = false
     @State private var isFlippedHorizontal = false
@@ -393,7 +431,35 @@ struct FullScreenImageView: View {
                 .ignoresSafeArea()
                 .onTapGesture { onClose() }
             
-            if let image = nsImage {
+            if let frames = gifFrames, !frames.isEmpty {
+                // Animated GIF
+                let nsImage = NSImage(cgImage: frames[currentFrameIndex].cgImage, size: .zero)
+                let currentFrame = Image(nsImage: nsImage)
+                Group {
+                    if isInverted && isBlackAndWhite {
+                        currentFrame
+                            .resizable()
+                            .scaledToFit()
+                            .colorInvert()
+                            .grayscale(1.0)
+                    } else if isInverted {
+                        currentFrame
+                            .resizable()
+                            .scaledToFit()
+                            .colorInvert()
+                    } else if isBlackAndWhite {
+                        currentFrame
+                            .resizable()
+                            .scaledToFit()
+                            .grayscale(1.0)
+                    } else {
+                        currentFrame
+                            .resizable()
+                            .scaledToFit()
+                    }
+                }
+            } else if let image = nsImage {
+                // Static image
                 Group {
                     if isInverted && isBlackAndWhite {
                         Image(nsImage: image)
@@ -565,17 +631,58 @@ struct FullScreenImageView: View {
         }
         .zIndex(1)
         .onAppear {
-            loadImage(from: url) }
+            loadImage(from: url)
+        }
         .onChange(of: url) { oldURL, newURL in
+            stopGIFAnimation()
             nsImage = nil
+            gifFrames = nil
+            currentFrameIndex = 0
             zoomState.reset()
             loadImage(from: newURL)
         }
+        .onDisappear {
+            stopGIFAnimation()
+        }
     }
-    
+
+    private func stopGIFAnimation() {
+        animationTimer?.invalidate()
+        animationTimer = nil
+    }
+
+    private func startGIFAnimation(_ frames: [GIFFrame]) {
+        stopGIFAnimation()
+        guard !frames.isEmpty else { return }
+
+        var frameIndex = 0
+        var accumulatedTime = 0.0
+
+        func scheduleNextFrame() {
+            let currentDuration = frames[frameIndex].duration
+            let nextFrameTime = currentDuration
+
+            animationTimer = Timer.scheduledTimer(withTimeInterval: nextFrameTime, repeats: false) { _ in
+                DispatchQueue.main.async {
+                    frameIndex = (frameIndex + 1) % frames.count
+                    self.currentFrameIndex = frameIndex
+                    scheduleNextFrame()
+                }
+            }
+        }
+
+        scheduleNextFrame()
+    }
+
     private func loadImage(from url: URL) {
         DispatchQueue.global(qos: .userInteractive).async {
-            if let img = NSImage(contentsOf: url) {
+            if GIFAnimator.isGIF(url), let frames = GIFAnimator.extractFrames(from: url) {
+                DispatchQueue.main.async {
+                    self.gifFrames = frames
+                    self.currentFrameIndex = 0
+                    self.startGIFAnimation(frames)
+                }
+            } else if let img = NSImage(contentsOf: url) {
                 DispatchQueue.main.async {
                     self.nsImage = img
                 }
