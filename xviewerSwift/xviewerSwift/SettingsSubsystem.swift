@@ -65,43 +65,77 @@ struct SettingsView: View {
             
             Divider()
             
-            Form {
-                LabeledContent {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(settings.favoritesURL?.path ?? "None Selected")
-                                .foregroundColor(settings.favoritesURL == nil ? .secondary : .primary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .frame(maxWidth: 250, alignment: .leading)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 4)
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(4)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-                                )
-                                .help(settings.favoritesURL?.path ?? "None Selected")
-                            
-                            Button("Choose...") {
-                                selectFavoritesFolder()
-                            }
-                        }
-                        
-                        Text("Files marked as favorites will be moved to this folder.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+            TabView {
+                generalSettings
+                    .tabItem {
+                        Label("General", systemImage: "gearshape")
                     }
-                } label: {
-                    Text("Favorites Path:")
-                }
+                
+                shortcutsSettings
+                    .tabItem {
+                        Label("Shortcuts", systemImage: "keyboard")
+                    }
             }
             .padding(20)
-            
-            Spacer()
         }
-        .frame(width: 500, height: 200)
+        .frame(width: 550, height: 450)
+    }
+    
+    private var generalSettings: some View {
+        Form {
+            LabeledContent {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(settings.favoritesURL?.path ?? "None Selected")
+                            .foregroundColor(settings.favoritesURL == nil ? .secondary : .primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 250, alignment: .leading)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .background(Color(NSColor.controlBackgroundColor))
+                            .cornerRadius(4)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                            )
+                            .help(settings.favoritesURL?.path ?? "None Selected")
+                        
+                        Button("Choose...") {
+                            selectFavoritesFolder()
+                        }
+                    }
+                    
+                    Text("Files marked as favorites will be moved to this folder.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } label: {
+                Text("Favorites Path:")
+            }
+        }
+    }
+    
+    private var shortcutsSettings: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                ShortcutRow(action: "Close / Dismiss", key: "Esc")
+                ShortcutRow(action: "Toggle Split View", key: "Tab")
+                ShortcutRow(action: "Navigate Up", key: "Cmd + Up Arrow")
+                ShortcutRow(action: "Navigate Items", key: "Arrow Keys")
+                ShortcutRow(action: "Select All", key: "Cmd + A")
+                ShortcutRow(action: "Delete Item", key: "Backspace / Delete")
+                ShortcutRow(action: "Create New Folder", key: "Cmd + Shift + N")
+                ShortcutRow(action: "Open Selected", key: "Enter / Space")
+                ShortcutRow(action: "Toggle Favorite", key: "Cmd + M")
+                ShortcutRow(action: "Invert Image Colors", key: "Cmd + I")
+                ShortcutRow(action: "Black & White Image", key: "Cmd + B")
+                ShortcutRow(action: "Rotate Image Left", key: "Cmd + Left Arrow")
+                ShortcutRow(action: "Rotate Image Right", key: "Cmd + Right Arrow")
+                ShortcutRow(action: "Reset Image Rotation", key: "Delete")
+            }
+            .padding()
+        }
     }
     
     private func selectFavoritesFolder() {
@@ -114,6 +148,24 @@ struct SettingsView: View {
         
         if panel.runModal() == .OK, let url = panel.url {
             settings.setFavoritesURL(url)
+        }
+    }
+}
+
+struct ShortcutRow: View {
+    let action: String
+    let key: String
+    
+    var body: some View {
+        HStack {
+            Text(action)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .foregroundColor(.secondary)
+            Text("-")
+                .foregroundColor(.secondary)
+            Text(key)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .font(.system(.body, design: .monospaced))
         }
     }
 }

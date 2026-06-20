@@ -751,7 +751,24 @@ func copySelectedItemToClipboard() {
     func navigateUp() {
         guard let current = self.currentFolderURL else { return }
         let parentURL = current.deletingLastPathComponent()
-        loadFolder(url: parentURL, sidebarManager: nil)
+        
+        if current.path == parentURL.path { return }
+        
+        if FileManager.default.isReadableFile(atPath: parentURL.path) {
+            loadFolder(url: parentURL, sidebarManager: nil)
+        } else {
+            let panel = NSOpenPanel()
+            panel.message = "Please grant access to the parent folder to navigate up."
+            panel.prompt = "Grant Access"
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.directoryURL = parentURL
+            
+            if panel.runModal() == .OK, let selectedURL = panel.url {
+                self.loadFolder(url: selectedURL, sidebarManager: nil)
+            }
+        }
     }
     
     func sortItems(_ items: [FileItem]) -> [FileItem] {
