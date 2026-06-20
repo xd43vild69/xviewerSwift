@@ -523,6 +523,8 @@ func copySelectedItemToClipboard() {
             let newURL = currentDir.appendingPathComponent(folderName)
             do {
                 try FileManager.default.createDirectory(at: newURL, withIntermediateDirectories: true, attributes: nil)
+                // Pre-register the new folder in history so loadFolder() restores focus to it
+                self.folderHistory[currentDir] = newURL
                 loadFolder(url: currentDir, sidebarManager: nil) // Refresh the view
             } catch {
                 print("Error creating folder: \(error)")

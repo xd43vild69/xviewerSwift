@@ -1,15 +1,7 @@
-🔴 
+🔴  ---
 
-Crear en el context menu una opcion que permite particionar una gran carpeta en bloques de carpetas mas manegables para RED SMB, 
-al dar click en "partitioning" en el context menu se dividen las imagenes existentes de la carpeta actual en bloques de imagenes en nuevas carpetas en bloques de 100 imagenes por capeta.
 
-cada carpeta debe tener el mismo nombre de la carpeta padre mas un consecutivo
-
- 
-
-cuando presione una tecla sola como s o a del teclado debe posicionarse en la carpeta que contenga esta letra inicialmente, del panel activo
-
----
+cuando estoy se
 
 
 10. **Etiquetas o Clasificación:** Poder ponerles estrellas (del 1 al 5) o etiquetas de colores tipo Finder a las imágenes para organizarlas mejor.
