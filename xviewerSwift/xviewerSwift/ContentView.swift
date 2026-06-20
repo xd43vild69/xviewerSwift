@@ -1152,6 +1152,11 @@ struct ContentView: View {
                 
                 if !commandPressed && !optionPressed {
                     switch event.keyCode {
+                    case 48: // Tab
+                        if isSplitViewEnabled {
+                            activePane = (activePane == .left) ? .right : .left
+                        }
+                        return nil // consume event
                     case 120: // F2 key
                         activeSession().renameSelected()
                         return nil // consume event
@@ -1355,9 +1360,23 @@ struct ContentView: View {
                             PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
                                 .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
                                 .simultaneousGesture(TapGesture().onEnded { activePane = .left })
+                                .overlay(alignment: .top) {
+                                    if activePane == .left {
+                                        Rectangle()
+                                            .fill(Color.blue)
+                                            .frame(height: 2)
+                                    }
+                                }
                             PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelectionRight, session: sessionRight)
                                 .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
                                 .simultaneousGesture(TapGesture().onEnded { activePane = .right })
+                                .overlay(alignment: .top) {
+                                    if activePane == .right {
+                                        Rectangle()
+                                            .fill(Color.blue)
+                                            .frame(height: 2)
+                                    }
+                                }
                         }
                     } else {
                         PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
