@@ -859,6 +859,26 @@ func copySelectedItemToClipboard() {
         }
     }
     
+    private func withTimeout<T>(_ seconds: Double, operation: @escaping () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T?.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+
+            while let result = try await group.next() {
+                if let value = result {
+                    group.cancelAll()
+                    return value
+                }
+            }
+            throw NSError(domain: "TimeoutError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Folder load timed out"])
+        }
+    }
+
     func sortItems(_ items: [FileItem]) -> [FileItem] {
         return items.sorted {
             if $0.isDirectory && !$1.isDirectory { return true }
@@ -902,11 +922,28 @@ func copySelectedItemToClipboard() {
         }
         ThumbnailLoader.shared.maxTasks = isLocalFolder ? 8 : 2
 
-        loadTask = Task.detached(priority: .userInitiated) { [weak self] in
+        loadTask = Task.detached(priority: .userInitiated) { [weak self, isLocalFolder] in
             guard let self else { return }
 
             let keys: [URLResourceKey] = [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey]
-            guard let fileURLs = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
+            let timeoutSeconds = isLocalFolder ? 5.0 : 30.0
+
+            let fileURLs: [URL]?
+            do {
+                fileURLs = try await self.withTimeout(timeoutSeconds) {
+                    try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])
+                }
+            } catch {
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    guard self.currentFolderURL == url else { return }
+                    self.folderContents = []
+                    self.showNotification("⏱️ Folder load timed out")
+                }
+                return
+            }
+
+            guard let fileURLs = fileURLs else {
                 if Task.isCancelled { return }
                 await MainActor.run {
                     guard self.currentFolderURL == url else { return }

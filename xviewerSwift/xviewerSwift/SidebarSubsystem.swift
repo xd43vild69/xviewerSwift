@@ -33,7 +33,7 @@ class SidebarManager: ObservableObject {
     @Published var sources: [SidebarFolderItem] = []
     @Published var bookmarks: [SidebarFolderItem] = []
     @Published var recent: [SidebarFolderItem] = []
-    
+
     private let bookmarksKey = "sidebar_bookmarks_v1"
     private let recentKey = "sidebar_recent_v1"
 
@@ -41,7 +41,7 @@ class SidebarManager: ObservableObject {
         loadDefaultSources()
         loadState()
     }
-    
+
     private func loadDefaultSources() {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
@@ -67,10 +67,10 @@ class SidebarManager: ObservableObject {
             let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "clock", visitCount: 1, bookmarkData: bData)
             recent.insert(newItem, at: 0)
         }
-        
+
         // Ordenamiento descendente por peso de frecuencia (Frequency Metric)
         recent.sort { $0.visitCount > $1.visitCount }
-        
+
         while recent.count > 7 {
             let removed = recent.removeLast()
             removed.url.stopAccessingSecurityScopedResource()
@@ -149,7 +149,7 @@ class SidebarManager: ObservableObject {
               let persistedItems = try? JSONDecoder().decode([PersistedSidebarItem].self, from: data) else {
             return []
         }
-        
+
         var loadedItems: [SidebarFolderItem] = []
         for pItem in persistedItems {
             var isStale = false
