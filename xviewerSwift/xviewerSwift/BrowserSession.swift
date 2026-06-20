@@ -845,7 +845,12 @@ func copySelectedItemToClipboard() {
         ThumbnailLoader.shared.maxTasks = isLocalFolder ? 8 : 2
         
         DispatchQueue.global(qos: .userInitiated).async {
-            guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else {
+            let keys: [URLResourceKey] = [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey]
+            guard let fileURLs = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
+                DispatchQueue.main.async {
+                    guard self.currentFolderURL == url else { return }
+                    self.folderContents = []
+                }
                 return
             }
             
@@ -854,13 +859,13 @@ func copySelectedItemToClipboard() {
             let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "webp"]
             var otherCountLocal = 0
             
-            for case let fileURL as URL in enumerator {
+            for fileURL in fileURLs {
                 var isDirectory = false
                 var fileDate = Date.distantPast
                 var fileSize: Int64 = 0
                 var isLocal = true
                 
-                if let resourceValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey]) {
+                if let resourceValues = try? fileURL.resourceValues(forKeys: Set(keys)) {
                     isDirectory = resourceValues.isDirectory ?? false
                     fileDate = resourceValues.creationDate ?? Date.distantPast
                     fileSize = Int64(resourceValues.fileSize ?? 0)

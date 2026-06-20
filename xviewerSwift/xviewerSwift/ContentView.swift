@@ -187,23 +187,16 @@ struct FileItemView: View {
             ThumbnailCache.shared.set(representation.nsImage, for: self.url)
             self.thumbnail = representation.nsImage
         } else if !isLocal {
-            // Ultimate fallback for network shares if QuickLook fails: fetch over network
-            let img = await Task.detached(priority: .userInitiated) { () -> NSImage? in
-                let options: [CFString: Any] = [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 160
-                ]
-                if let imageSource = CGImageSourceCreateWithURL(self.url as CFURL, nil),
-                   let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
-                    return NSImage(cgImage: cgImage, size: .zero)
-                }
-                return nil
+            // Fast fallback for network shares if QuickLook fails: fetch system icon
+            // for the file type without streaming the file content over network.
+            let icon = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+                let path = self.url.path
+                return NSWorkspace.shared.icon(forFile: path)
             }.value
             
-            if let img = img {
-                ThumbnailCache.shared.set(img, for: self.url)
-                self.thumbnail = img
+            if let icon = icon {
+                ThumbnailCache.shared.set(icon, for: self.url)
+                self.thumbnail = icon
             }
         }
     }

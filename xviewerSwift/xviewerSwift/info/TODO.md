@@ -48,7 +48,7 @@ Para poder soportar diferentes modos de visualización (como cuadrícula y lista
 ---
 
 
-TODO Avanzado
+# TODO Avanzado
 
 I will inspect the workspace directory to understand the current structure and implementation status of the `xviewerSwift` project.
 
@@ -137,4 +137,59 @@ Basándome en un análisis de la arquitectura actual de **xviewerSwift** y en lo
 
 
 
+# Performance
 
+
+I will search for `loadFolder` or thumbnail generation code in `BrowserSession.swift` to see how the files are read, parsed, and cached.
+
+Searched for "func loadFolder"
+
+I will inspect the folder loading implementation in `BrowserSession.swift` around line 820.
+
+Viewed BrowserSession.swift:820-930
+
+I will search for `ThumbnailLoader` class definition to see how thumbnails are generated and cached.
+
+Searched for "class ThumbnailLoader"
+
+I will view the `ThumbnailLoader` class definition in `ContentView.swift` around line 28.
+
+Viewed ContentView.swift:20-160
+
+I will view more of `ContentView.swift` to inspect how thumbnails are loaded for network/non-local files.
+
+Viewed ContentView.swift:160-200
+
+Aquí tienes el análisis detallado de los problemas de rendimiento más graves al previsualizar imágenes (tanto en local como en red) y otros cuellos de botella que requieren una refactorización en **xviewerSwift**:
+
+---
+
+### I. Problemas de rendimiento graves en previsualización (Local y Red)
+
+#### 1. Previsualización y Miniaturas en Red (SMB / NFS / Unidades Externas)
+* **Descarga/Lectura completa como plan de contingencia (Fallback over Network):** Si la generación de QuickLook (`QLThumbnailGenerator`) falla o no está disponible para un archivo en red, el código recurre a `CGImageSourceCreateThumbnailAtIndex`. Esto descarga y procesa el archivo binario completo (que pueden ser decenas de megabytes si es un archivo RAW o TIFF) a través de la red solo para generar una miniatura de 160px, congestionando drásticamente el ancho de banda y congelando la interfaz.
+* **Viajes de ida y vuelta síncronos en la enumeración (Network Round-trips):** Durante `loadFolder`, el enumerador realiza consultas individuales de propiedades de archivo (`fileURL.resourceValues(forKeys:)`) secuencialmente para cada elemento. En red, cada consulta añade latencia de comunicación (round-trip delay), lo que hace que listar directorios remotos con cientos de imágenes sea extremadamente lento en comparación con una lectura por lotes (bulk read).
+
+#### 2. Previsualización y Miniaturas en Local
+* **Saturación del subsistema de E/S (Disk I/O Choke):** Aunque `ThumbnailLoader` limita las tareas locales concurrentes a 8, abrir una carpeta con cientos de archivos grandes (ej. RAW de 50MB o más) provoca que se encolen decenas de tareas que leen el disco simultáneamente. Esto compite por el ancho de banda del SSD y ralentiza tanto el renderizado de la cuadrícula como la navegación general.
+* **Falta de descompresión progresiva en Pantalla Completa:** Al abrir una imagen en pantalla completa, se carga el recurso completo directamente. Para pantallas Retina de alta densidad y archivos masivos, esto puede causar micro-tirones (jank) de interfaz si la imagen no se decodifica en un hilo de fondo optimizado con reducción de escala (downsampling) proporcional a la resolución de la pantalla.
+
+---
+
+### II. Otros problemas de rendimiento que requieren refactorización
+
+#### 1. Actualización destructiva de la Grid de SwiftUI (`folderContents` Updates)
+* **Reemplazo total del estado:** En `loadFolder`, la lista completa se ordena en segundo plano y luego se asigna directamente a `self.folderContents` en el hilo principal. Esto destruye e inserta la lista entera en SwiftUI. Para carpetas grandes (miles de elementos), este reemplazo masivo obliga a SwiftUI a recalcular el layout de toda la cuadrícula (`LazyVGrid`), causando caídas graves de fotogramas (dropped frames).
+* **Refactorización recomendada:** Implementar actualizaciones diferenciales (diffing) o paginación/carga diferida de la lista para actualizar solo los elementos visibles, utilizando identificadores estables y persistentes.
+
+#### 2. Lectura ineficiente de metadatos (PNG Text Chunks)
+* **Escaneo lineal del archivo:** En `PropertiesSubsystem.swift`, para buscar los metadatos de ComfyUI (`prompt` y `workflow`), se abre un `FileHandle` y se lee secuencialmente el archivo PNG. Si la imagen es muy grande, esto consume recursos de lectura innecesarios.
+* **Refactorización recomendada:** Modificar el lector binario para analizar únicamente las cabeceras del archivo PNG y los primeros bloques de metadatos, deteniendo la lectura tan pronto como empiece el bloque de datos de imagen (`IDAT`), o utilizar mapas de memoria (`Data(contentsOf:options: .mappedIfSafe)`).
+
+#### 3. Recarga masiva ante cambios de archivos (Directory Observers)
+* **Falta de reactividad granular:** Al realizar operaciones de archivo (mover, copiar o borrar), la aplicación invoca un `loadFolder` completo para refrescar la interfaz (como se observa tras resolver conflictos o renombrar). Esto obliga a re-enumerar todo el directorio y regenerar el estado desde cero.
+* **Refactorización recomendada:** Utilizar APIs nativas como `FSEvents` o `DispatchSourceFileSystem` para escuchar cambios específicos y actualizar la colección `folderContents` de manera incremental (añadiendo, eliminando o modificando únicamente los items afectados) en lugar de recargar la carpeta entera.
+
+#### 4. Cancelación ineficaz de tareas de miniaturas (Orphaned Tasks)
+* **Procesamiento de tareas huérfanas:** Cuando el usuario navega rápidamente de una carpeta a otra, las tareas de generación de miniaturas que ya han pasado el estado de espera (`wait()`) continúan ejecutándose en segundo plano hasta completarse, a pesar de que el usuario ya no está visualizando esa carpeta. `CGImageSourceCreateThumbnailAtIndex` es una llamada síncrona de C que no responde a la cancelación cooperativa de Swift una vez iniciada.
+* **Refactorización recomendada:** Implementar un sistema de cancelación activa que invalide o descarte explícitamente los hilos de decodificación y limpie la cola de solicitudes del cargador de miniaturas inmediatamente al cambiar de directorio.
