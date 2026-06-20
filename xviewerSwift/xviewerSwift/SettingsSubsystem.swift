@@ -118,24 +118,51 @@ struct SettingsView: View {
     
     private var shortcutsSettings: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                ShortcutRow(action: "Close / Dismiss", key: "Esc")
-                ShortcutRow(action: "Toggle Split View", key: "Tab")
-                ShortcutRow(action: "Navigate Up", key: "Cmd + Up Arrow")
-                ShortcutRow(action: "Navigate Items", key: "Arrow Keys")
-                ShortcutRow(action: "Navigate to First", key: "Cmd + Shift + Up Arrow")
-                ShortcutRow(action: "Navigate to Last", key: "Cmd + Shift + Down Arrow")
-                ShortcutRow(action: "Select All", key: "Cmd + A")
-                ShortcutRow(action: "Delete Item", key: "Backspace / Delete")
-                ShortcutRow(action: "Create New Folder", key: "Cmd + Shift + N")
-                ShortcutRow(action: "Open Selected", key: "Enter / Space")
-                ShortcutRow(action: "Toggle Favorite", key: "Cmd + M")
-                ShortcutRow(action: "Invert Image Colors", key: "Cmd + I")
-                ShortcutRow(action: "Flip Image Horizontal", key: "Cmd + H")
-                ShortcutRow(action: "Black & White Image", key: "Cmd + B")
-                ShortcutRow(action: "Rotate Image Left", key: "Cmd + Left Arrow")
-                ShortcutRow(action: "Rotate Image Right", key: "Cmd + Right Arrow")
-                ShortcutRow(action: "Reset Image Rotation", key: "Delete")
+            VStack(alignment: .leading, spacing: 12) {
+                Group {
+                    Text("General & File Operations").font(.headline).foregroundColor(.secondary)
+                    ShortcutRow(action: "Close / Dismiss", key: "Esc")
+                    ShortcutRow(action: "Select Folder", key: "Cmd + O")
+                    ShortcutRow(action: "Select All", key: "Cmd + A")
+                    ShortcutRow(action: "Delete Item", key: "Backspace")
+                    ShortcutRow(action: "Create New Folder", key: "Cmd + Shift + N")
+                    ShortcutRow(action: "Rename Item", key: "F2")
+                    ShortcutRow(action: "Copy Item", key: "Cmd + C")
+                    ShortcutRow(action: "Paste Item", key: "Cmd + V")
+                }
+                
+                Divider().padding(.vertical, 4)
+                
+                Group {
+                    Text("Navigation").font(.headline).foregroundColor(.secondary)
+                    ShortcutRow(action: "Open Selected", key: "Enter / Space")
+                    ShortcutRow(action: "Navigate Items", key: "Arrow Keys")
+                    ShortcutRow(action: "Navigate Up", key: "Cmd + Up")
+                    ShortcutRow(action: "Navigate to First", key: "Cmd + Shift + Up")
+                    ShortcutRow(action: "Navigate to Last", key: "Cmd + Shift + Down")
+                }
+                
+                Divider().padding(.vertical, 4)
+                
+                Group {
+                    Text("Split View").font(.headline).foregroundColor(.secondary)
+                    ShortcutRow(action: "Toggle Split View", key: "Cmd + S")
+                    ShortcutRow(action: "Switch Active Pane", key: "Tab")
+                    ShortcutRow(action: "Move to Other Pane", key: "Option + L/R Arrow")
+                }
+                
+                Divider().padding(.vertical, 4)
+                
+                Group {
+                    Text("Image Viewer").font(.headline).foregroundColor(.secondary)
+                    ShortcutRow(action: "Toggle Favorite", key: "Cmd + M")
+                    ShortcutRow(action: "Invert Image Colors", key: "Cmd + I")
+                    ShortcutRow(action: "Black & White Image", key: "Cmd + B")
+                    ShortcutRow(action: "Flip Image Horizontal", key: "Cmd + H")
+                    ShortcutRow(action: "Rotate Image Left", key: "Cmd + Left")
+                    ShortcutRow(action: "Rotate Image Right", key: "Cmd + Right")
+                    ShortcutRow(action: "Reset Image Rotation", key: "Delete")
+                }
             }
             .padding()
         }

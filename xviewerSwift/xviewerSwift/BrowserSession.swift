@@ -108,8 +108,20 @@ class BrowserSession: ObservableObject {
     @Published var notificationMessage: String? = nil
     @Published var folderHistory: [URL: URL] = [:]
 
+    // Navigation history stack (back/forward)
+    @Published var navigationHistory: [URL] = []
+    @Published var navigationIndex: Int = -1
+
     var imageItems: [FileItem] {
         folderContents.filter { !$0.isDirectory }
+    }
+
+    var canGoBack: Bool {
+        navigationIndex > 0
+    }
+
+    var canGoForward: Bool {
+        navigationIndex >= 0 && navigationIndex < navigationHistory.count - 1
     }
 
 func copySelectedItemToClipboard() {
@@ -965,9 +977,9 @@ func copySelectedItemToClipboard() {
     func navigateUp() {
         guard let current = self.currentFolderURL else { return }
         let parentURL = current.deletingLastPathComponent()
-        
+
         if current.path == parentURL.path { return }
-        
+
         if FileManager.default.isReadableFile(atPath: parentURL.path) {
             loadFolder(url: parentURL, sidebarManager: nil)
         } else {
@@ -978,13 +990,27 @@ func copySelectedItemToClipboard() {
             panel.canChooseDirectories = true
             panel.allowsMultipleSelection = false
             panel.directoryURL = parentURL
-            
+
             if panel.runModal() == .OK, let selectedURL = panel.url {
                 self.loadFolder(url: selectedURL, sidebarManager: nil)
             }
         }
     }
-    
+
+    func goBack() {
+        guard navigationIndex > 0 else { return }
+        navigationIndex -= 1
+        let previousURL = navigationHistory[navigationIndex]
+        loadFolder(url: previousURL, sidebarManager: nil, pushToHistory: false)
+    }
+
+    func goForward() {
+        guard navigationIndex >= 0 && navigationIndex < navigationHistory.count - 1 else { return }
+        navigationIndex += 1
+        let nextURL = navigationHistory[navigationIndex]
+        loadFolder(url: nextURL, sidebarManager: nil, pushToHistory: false)
+    }
+
     private func withTimeout<T>(_ seconds: Double, operation: @escaping () async throws -> T) async throws -> T {
         try await withThrowingTaskGroup(of: T?.self) { group in
             group.addTask {
@@ -1021,7 +1047,7 @@ func copySelectedItemToClipboard() {
         }
     }
     
-    func loadFolder(url: URL, sidebarManager: SidebarManager?) {
+    func loadFolder(url: URL, sidebarManager: SidebarManager?, pushToHistory: Bool = true) {
         loadTask?.cancel()
 
         // Registrar la visita usando el manager pasado o la referencia guardada,
@@ -1029,6 +1055,14 @@ func copySelectedItemToClipboard() {
         (sidebarManager ?? self.sidebarManager)?.recordRecentVisit(url: url)
         if let current = self.currentFolderURL, let active = self.activeItemURL {
             folderHistory[current] = active
+        }
+
+        // Update navigation history for back/forward.
+        // Skipped when called from goBack/goForward since they manage the index themselves.
+        if pushToHistory {
+            navigationHistory = Array(navigationHistory.prefix(navigationIndex + 1))
+            navigationHistory.append(url)
+            navigationIndex = navigationHistory.count - 1
         }
 
         self.currentFolderURL = url

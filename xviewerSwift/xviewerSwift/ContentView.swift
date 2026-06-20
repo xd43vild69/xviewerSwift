@@ -1098,6 +1098,12 @@ struct ContentView: View {
                         if event.keyCode == 126 { // Up arrow
                             activeSession().navigateUp()
                             return nil
+                        } else if event.keyCode == 123 { // Left arrow
+                            activeSession().goBack()
+                            return nil
+                        } else if event.keyCode == 124 { // Right arrow
+                            activeSession().goForward()
+                            return nil
                         }
                     }
                 }
