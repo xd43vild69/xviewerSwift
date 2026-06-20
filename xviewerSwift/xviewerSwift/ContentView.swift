@@ -1243,7 +1243,11 @@ struct ContentView: View {
             Button(action: { activeSession().selectAllItems() }) { Text("") }
                 .keyboardShortcut("a", modifiers: [.command])
                 .opacity(0)
-                
+
+            Button(action: { activeSession().selectAllItemsAndFolders() }) { Text("") }
+                .keyboardShortcut("a", modifiers: [.command, .control])
+                .opacity(0)
+
             Button(action: { activeSession().createNewFolder() }) { Text("") }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .opacity(0)

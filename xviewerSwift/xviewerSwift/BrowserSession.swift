@@ -237,7 +237,11 @@ func copySelectedItemToClipboard() {
     func selectAllItems() {
         self.selectedItemURLs = Set(self.folderContents.filter { !$0.isDirectory }.map { $0.url })
     }
-    
+
+    func selectAllItemsAndFolders() {
+        self.selectedItemURLs = Set(self.folderContents.map { $0.url })
+    }
+
     func jumpToFirstItem(startingWith character: String) {
         guard !folderContents.isEmpty else { return }
         let prefix = character.lowercased()
