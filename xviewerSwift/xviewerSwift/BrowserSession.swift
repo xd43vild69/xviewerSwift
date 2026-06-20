@@ -16,6 +16,7 @@ class BrowserSession: ObservableObject {
     @Published var isScrolling: Bool = false
 
     private var loadTask: Task<Void, Never>?
+    private var metadataTask: Task<Void, Never>?
 
     @Published var isShowingProperties = false
     @Published var propertiesURL: URL?
@@ -341,15 +342,17 @@ func copySelectedItemToClipboard() {
     }
     
     func updateMetadata(for url: URL?) {
+        metadataTask?.cancel()
+
         guard let url = url else {
             self.metadataString = ""
             return
         }
-        
+
         let name = url.lastPathComponent
         self.metadataString = "\(name)  |  Loading..."
-        
-        Task.detached(priority: .userInitiated) {
+
+        metadataTask = Task.detached(priority: .userInitiated) {
             let isAccessed = url.startAccessingSecurityScopedResource()
             defer { if isAccessed { url.stopAccessingSecurityScopedResource() } }
             
