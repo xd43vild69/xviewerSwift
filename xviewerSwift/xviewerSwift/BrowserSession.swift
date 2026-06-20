@@ -79,6 +79,10 @@ class BrowserSession: ObservableObject {
     @Published var otherFileCount: Int = 0
     @Published var isScrolling: Bool = false
 
+    /// Referencia compartida para registrar visitas recientes desde cualquier ruta de navegación
+    /// (incluyendo Enter key y navegar a carpeta padre, que antes no registraban).
+    weak var sidebarManager: SidebarManager?
+
     private var loadTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
 
@@ -964,7 +968,9 @@ func copySelectedItemToClipboard() {
     func loadFolder(url: URL, sidebarManager: SidebarManager?) {
         loadTask?.cancel()
 
-        sidebarManager?.recordRecentVisit(url: url)
+        // Registrar la visita usando el manager pasado o la referencia guardada,
+        // para que TODA navegación (doble-clic, Enter, subir a padre) cuente.
+        (sidebarManager ?? self.sidebarManager)?.recordRecentVisit(url: url)
         if let current = self.currentFolderURL, let active = self.activeItemURL {
             folderHistory[current] = active
         }

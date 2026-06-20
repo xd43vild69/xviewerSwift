@@ -1456,6 +1456,10 @@ struct ContentView: View {
         }
         .onAppear {
             setupKeyboardMonitor()
+            // Conectar el sidebarManager a ambas sesiones para que toda navegación
+            // (Enter, subir a padre, etc.) registre visitas recientes.
+            session.sidebarManager = sidebarManager
+            sessionRight.sidebarManager = sidebarManager
             if session.currentFolderURL == nil {
                 let initialURL = session.restoreBookmark() ?? FileManager.default.homeDirectoryForCurrentUser
                 sidebarSelection = initialURL
