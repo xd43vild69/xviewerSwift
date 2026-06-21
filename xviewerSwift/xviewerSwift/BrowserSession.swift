@@ -1343,7 +1343,7 @@ func copySelectedItemToClipboard() {
            let local = resourceValues.volumeIsLocal {
             isLocalFolder = local
         }
-        thumbnailLoader.maxTasks = isLocalFolder ? 24 : 2
+        thumbnailLoader.maxTasks = isLocalFolder ? 24 : 6
 
         loadTask = Task.detached(priority: .userInitiated) { [weak self, isLocalFolder] in
             guard let self else { return }

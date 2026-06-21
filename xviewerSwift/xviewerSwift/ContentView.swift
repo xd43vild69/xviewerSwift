@@ -302,14 +302,14 @@ struct FileItemView: View {
         }
 
         // No está en cache: hacer debounce antes de generar
-        let debounceNs: UInt64 = item.isLocal ? 150_000_000 : 600_000_000
+        let debounceNs: UInt64 = item.isLocal ? 150_000_000 : 300_000_000
         do { try await Task.sleep(nanoseconds: debounceNs) } catch { return }
         guard !Task.isCancelled else { return }
 
         if let img = await ThumbnailCache.load(item: item, using: thumbnailLoader) {
             self.thumbnail = img
-        } else if !item.isLocal {
-            // Fallback remoto: icono genérico del sistema
+        } else if !item.isLocal && !Task.isCancelled {
+            // Fallback remoto: icono genérico del sistema (solo si no fue cancelado)
             let icon = NSWorkspace.shared.icon(forFileType: item.url.pathExtension)
             ThumbnailCache.shared.set(icon, for: item.url)
             Task.detached(priority: .background) {
