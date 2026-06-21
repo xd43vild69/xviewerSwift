@@ -100,21 +100,87 @@ class ThumbnailDiskCache {
 class ThumbnailCache {
     static let shared = ThumbnailCache()
     private let cache = NSCache<NSURL, NSImage>()
-    
+
     private init() {
-        cache.countLimit = 1000 // ~100 MB max for 160x160 thumbnails
+        cache.countLimit = 0
+        cache.totalCostLimit = 2 * 1024 * 1024 * 1024  // 2 GB — ~20,000 thumbnails
     }
-    
+
     func get(for url: URL) -> NSImage? {
         return cache.object(forKey: url as NSURL)
     }
-    
+
     func set(_ image: NSImage, for url: URL) {
-        cache.setObject(image, forKey: url as NSURL)
+        let cost = image.representations.first.map { $0.pixelsWide * $0.pixelsHigh * 4 } ?? 102_400
+        cache.setObject(image, forKey: url as NSURL, cost: cost)
     }
-    
+
     func clear() {
         cache.removeAllObjects()
+    }
+}
+
+extension ThumbnailCache {
+    /// Genera o recupera el thumbnail de un item sin debounce de scroll.
+    /// Apto para llamarse desde BrowserSession (preload) o desde FileItemView.
+    @discardableResult
+    static func load(item: FileItem, using loader: ThumbnailLoader) async -> NSImage? {
+        let url = item.url
+
+        if let cached = ThumbnailCache.shared.get(for: url) { return cached }
+
+        let diskImg = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+            guard !Task.isCancelled else { return nil }
+            return ThumbnailDiskCache.shared.get(for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
+        }.value
+
+        if let img = diskImg {
+            ThumbnailCache.shared.set(img, for: url)
+            return img
+        }
+
+        guard !Task.isCancelled else { return nil }
+
+        do {
+            try await loader.wait()
+            defer { loader.signal() }
+            guard !Task.isCancelled else { return nil }
+
+            if let cached = ThumbnailCache.shared.get(for: url) { return cached }
+
+            if item.isLocal {
+                let loadTask = Task.detached(priority: .userInitiated) { () -> NSImage? in
+                    guard !Task.isCancelled else { return nil }
+                    let options: [CFString: Any] = [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceThumbnailMaxPixelSize: 160,
+                        kCGImageSourceShouldCache: true
+                    ]
+                    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+                    guard !Task.isCancelled else { return nil }
+                    guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary) else { return nil }
+                    return NSImage(cgImage: cg, size: .zero)
+                }
+                let img = await withTaskCancellationHandler { await loadTask.value } onCancel: { loadTask.cancel() }
+                guard !Task.isCancelled, let img else { return nil }
+                ThumbnailCache.shared.set(img, for: url)
+                Task.detached(priority: .background) {
+                    ThumbnailDiskCache.shared.set(img, for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
+                }
+                return img
+            } else {
+                let size = CGSize(width: 160, height: 160)
+                let request = QLThumbnailGenerator.Request(fileAt: url, size: size, scale: 2.0, representationTypes: .thumbnail)
+                guard let representation = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) else { return nil }
+                let img = representation.nsImage
+                ThumbnailCache.shared.set(img, for: url)
+                Task.detached(priority: .background) {
+                    ThumbnailDiskCache.shared.set(img, for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
+                }
+                return img
+            }
+        } catch { return nil }
     }
 }
 
@@ -186,115 +252,22 @@ struct FileItemView: View {
     }
     
     private func loadThumbnail() async {
-        let url = item.url
-        let isLocal = item.isLocal
-        
-        // 1. FAST-PATH (Memory Cache)
-        if let cached = ThumbnailCache.shared.get(for: url) {
+        // Check rápido: ¿está en cache ya? (de preload) → mostrar al instante
+        if let cached = ThumbnailCache.shared.get(for: item.url) {
             self.thumbnail = cached
             return
         }
-        
-        // 2. FAST-PATH (Local Disk Cache) - 100% offline, zero network requests
-        let diskCached = await Task.detached(priority: .userInitiated) { () -> NSImage? in
-            if Task.isCancelled { return nil }
-            return ThumbnailDiskCache.shared.get(for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
-        }.value
-        
-        if Task.isCancelled { return }
-        
-        if let img = diskCached {
-            ThumbnailCache.shared.set(img, for: url)
-            self.thumbnail = img
-            return
-        }
-        
-        // 3. SLOW-PATH (Wait for scroll to end and fetch from network/generator)
-        // Remote volumes (SMB/NFS) need longer settle time to avoid thrashing on fast scroll
-        let debounceNs: UInt64 = isLocal ? 150_000_000 : 600_000_000
-        do {
-            try await Task.sleep(nanoseconds: debounceNs)
-        } catch {
-            return
-        }
-        
-        if Task.isCancelled { return }
-        
-        do {
-            try await thumbnailLoader.wait()
-            defer {
-                thumbnailLoader.signal()
-            }
-            
-            if Task.isCancelled { return }
-            
-            // Check memory cache again in case another task loaded it while we were waiting
-            if let cached = ThumbnailCache.shared.get(for: url) {
-                self.thumbnail = cached
-                return
-            }
-            
-            if isLocal {
-                let loadTask = Task.detached(priority: .userInitiated) { () -> NSImage? in
-                    if Task.isCancelled { return nil }
-                    let options: [CFString: Any] = [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceThumbnailMaxPixelSize: 160,
-                        kCGImageSourceShouldCache: true
-                    ]
-                    guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-                    if Task.isCancelled { return nil }
-                    if let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
-                        return NSImage(cgImage: cgImage, size: .zero)
-                    }
-                    return nil
-                }
-                
-                let img = await withTaskCancellationHandler {
-                    await loadTask.value
-                } onCancel: {
-                    loadTask.cancel()
-                }
-                
-                if Task.isCancelled { return }
-                
-                if let img = img {
-                    ThumbnailCache.shared.set(img, for: url)
-                    Task.detached(priority: .background) {
-                        ThumbnailDiskCache.shared.set(img, for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
-                    }
-                    self.thumbnail = img
-                } else {
-                    await loadQuickLookThumbnail()
-                }
-            } else {
-                await loadQuickLookThumbnail()
-            }
-        } catch {
-            // Cancelled while waiting for slot
-        }
-    }
-    
-    private func loadQuickLookThumbnail() async {
-        let size = CGSize(width: 160, height: 160)
-        let request = QLThumbnailGenerator.Request(
-            fileAt: item.url,
-            size: size,
-            scale: 2.0,
-            representationTypes: .thumbnail
-        )
-        
-        if let representation = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) {
-            let img = representation.nsImage
-            ThumbnailCache.shared.set(img, for: item.url)
-            Task.detached(priority: .background) {
-                ThumbnailDiskCache.shared.set(img, for: item.url, modificationDate: item.creationDate, fileSize: item.fileSize)
-            }
+
+        // No está en cache: hacer debounce antes de generar
+        let debounceNs: UInt64 = item.isLocal ? 150_000_000 : 600_000_000
+        do { try await Task.sleep(nanoseconds: debounceNs) } catch { return }
+        guard !Task.isCancelled else { return }
+
+        if let img = await ThumbnailCache.load(item: item, using: thumbnailLoader) {
             self.thumbnail = img
         } else if !item.isLocal {
-            let ext = item.url.pathExtension
-            let icon = NSWorkspace.shared.icon(forFileType: ext)
+            // Fallback remoto: icono genérico del sistema
+            let icon = NSWorkspace.shared.icon(forFileType: item.url.pathExtension)
             ThumbnailCache.shared.set(icon, for: item.url)
             Task.detached(priority: .background) {
                 ThumbnailDiskCache.shared.set(icon, for: item.url, modificationDate: item.creationDate, fileSize: item.fileSize)

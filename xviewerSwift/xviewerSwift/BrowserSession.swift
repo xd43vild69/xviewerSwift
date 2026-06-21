@@ -120,6 +120,7 @@ class BrowserSession: ObservableObject {
 
     private var loadTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
+    private var preloadTask: Task<Void, Never>?
 
     lazy var thumbnailLoader: ThumbnailLoader = ThumbnailLoader()
 
@@ -1276,6 +1277,7 @@ func copySelectedItemToClipboard() {
     
     func loadFolder(url: URL, sidebarManager: SidebarManager?, pushToHistory: Bool = true) {
         loadTask?.cancel()
+        preloadTask?.cancel()
 
         // Quick SMB connectivity check - fallback to home if unavailable
         if isSMBPath(url) {
@@ -1441,6 +1443,36 @@ func copySelectedItemToClipboard() {
                     self.otherFileCount = otherCountLocal
                     if self.activeItemURL == nil {
                         if let u = sortedItems.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
+                    }
+                }
+
+                // Pre-generación inteligente: Fase 1 (visibles) + Fase 2 (rest)
+                let itemsToPreload = sortedItems.filter { !$0.isDirectory }
+                let visibleCount = 40
+                let (visibleItems, restItems) = (
+                    Array(itemsToPreload.prefix(visibleCount)),
+                    Array(itemsToPreload.dropFirst(visibleCount))
+                )
+                let loader = await MainActor.run { self.thumbnailLoader }
+
+                await MainActor.run {
+                    // Fase 1: Pre-generar ~40 visibles con prioridad alta
+                    self.preloadTask = Task.detached(priority: .userInitiated) { [weak loader] in
+                        guard let loader else { return }
+                        for item in visibleItems {
+                            guard !Task.isCancelled else { break }
+                            await ThumbnailCache.load(item: item, using: loader)
+                        }
+
+                        // Apenas Fase 1 complete, lanzar Fase 2 con prioridad baja
+                        if !Task.isCancelled && !restItems.isEmpty {
+                            Task.detached(priority: .utility) {
+                                for item in restItems {
+                                    guard !Task.isCancelled else { break }
+                                    await ThumbnailCache.load(item: item, using: loader)
+                                }
+                            }
+                        }
                     }
                 }
             } else {
