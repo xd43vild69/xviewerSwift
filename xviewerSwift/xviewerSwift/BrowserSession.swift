@@ -422,60 +422,71 @@ func copySelectedItemToClipboard() {
         let operationID = UUID()
         fileOperation.cancellationToken = operationID
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
 
-            DispatchQueue.main.async { [weak self] in
-                self?.fileOperation.isActive = true
-                self?.fileOperation.totalCount = targets.count
-                self?.fileOperation.processedCount = 0
+            await MainActor.run {
+                self.fileOperation.isActive = true
+                self.fileOperation.totalCount = targets.count
+                self.fileOperation.processedCount = 0
             }
 
             var successCount = 0
             var deletedURLs: [URL] = []
+            var hasErrors = false
+            var errorMessages: [String] = []
 
-            do {
-                for url in targets {
-                    if self.fileOperation.cancellationToken != operationID { break }
+            for url in targets {
+                let currentToken = await MainActor.run { self.fileOperation.cancellationToken }
+                if currentToken != operationID { break }
 
-                    let fileName = url.lastPathComponent
-
-                    do {
-                        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-                        DispatchQueue.main.async { [weak self] in
-                            self?.recordOperation(.delete(source: url))
-                        }
-                        deletedURLs.append(url)
-                        successCount += 1
-                    } catch {
-                        do {
-                            try FileManager.default.removeItem(at: url)
-                            deletedURLs.append(url)
-                            successCount += 1
-                        } catch {
-                            print("Error deleting file \(fileName): \(error)")
-                        }
+                let fileName = url.lastPathComponent
+                let accessed = url.startAccessingSecurityScopedResource()
+                
+                do {
+                    _ = try await NSWorkspace.shared.recycle([url])
+                    await MainActor.run {
+                        self.recordOperation(.delete(source: url))
                     }
-
-                    DispatchQueue.main.async { [weak self] in
-                        self?.fileOperation.processedCount = successCount
-                        self?.fileOperation.progress = Double(successCount) / Double(targets.count)
-                        self?.fileOperation.currentFile = fileName
-                    }
+                    deletedURLs.append(url)
+                    successCount += 1
+                } catch {
+                    hasErrors = true
+                    errorMessages.append("❌ \(fileName): \(error.localizedDescription)")
+                    print("Error moving file to trash \(fileName): \(error)")
                 }
+                
+                if accessed { url.stopAccessingSecurityScopedResource() }
 
-                DispatchQueue.main.async { [weak self] in
-                    self?.folderContents.removeAll(where: { deletedURLs.contains($0.url) })
-                    self?.selectedItemURLs = []
-                    if let next = nextURL {
-                        self?.selectedItemURLs = [next]
-                        self?.activeItemURL = next
+                await MainActor.run {
+                    self.fileOperation.processedCount = successCount
+                    self.fileOperation.progress = Double(successCount) / Double(targets.count)
+                    self.fileOperation.currentFile = fileName
+                }
+            }
+
+            await MainActor.run {
+                self.folderContents.removeAll(where: { deletedURLs.contains($0.url) })
+                self.selectedItemURLs = []
+                if let next = nextURL {
+                    self.selectedItemURLs = [next]
+                    self.activeItemURL = next
+                } else {
+                    self.activeItemURL = nil
+                }
+                if self.fullScreenImageURL != nil { self.fullScreenImageURL = nextURL }
+
+                if hasErrors {
+                    if successCount > 0 {
+                        self.showNotification("⚠️ Enviados a papelera: \(successCount)/\(targets.count)")
                     } else {
-                        self?.activeItemURL = nil
+                        self.showNotification("❌ No se pudo enviar a papelera")
                     }
-                    if self?.fullScreenImageURL != nil { self?.fullScreenImageURL = nextURL }
-                    self?.fileOperation.reset()
+                } else if successCount > 0 {
+                    self.showNotification("✅ Enviados a papelera: \(successCount) archivos")
                 }
+
+                self.fileOperation.reset()
             }
         }
     }
