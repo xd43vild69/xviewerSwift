@@ -68,7 +68,20 @@ struct PaneBrowserView: View {
                                 updateSelectionAnchorAction: { url in
                                     session.updateSelectionAnchor(url)
                                 },
-                                isActive: session.activeItemURL == item.url
+                                isActive: session.activeItemURL == item.url,
+                                canCompare: session.selectedItemURLs.count == 2
+                                    && !item.isDirectory
+                                    && session.selectedItemURLs.contains(item.url)
+                                    && session.selectedItemURLs.allSatisfy { url in
+                                        session.folderContents.first(where: { $0.url == url })?.isDirectory == false
+                                    },
+                                compareAction: {
+                                    let urls = Array(session.selectedItemURLs)
+                                        .filter { url in session.folderContents.first(where: { $0.url == url })?.isDirectory == false }
+                                    if urls.count == 2 {
+                                        session.compareImageURLs = urls
+                                    }
+                                }
                             )
                             .id(item.url)
                         }

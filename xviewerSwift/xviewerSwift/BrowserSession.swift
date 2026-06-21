@@ -107,6 +107,7 @@ class BrowserSession: ObservableObject {
     @Published var showCopiedFeedback: Bool = false
     @Published var notificationMessage: String? = nil
     @Published var folderHistory: [URL: URL] = [:]
+    @Published var compareImageURLs: [URL]? = nil
 
     // Navigation history stack (back/forward)
     @Published var navigationHistory: [URL] = []

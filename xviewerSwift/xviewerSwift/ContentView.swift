@@ -768,6 +768,143 @@ struct FullScreenImageView: View {
 
 
 
+// MARK: - Compare Mode
+
+struct CompareImagePanel: View {
+    let url: URL
+    let isInverted: Bool
+    let isBlackAndWhite: Bool
+    let isFlippedHorizontal: Bool
+
+    @State private var nsImage: NSImage?
+    @State private var gifFrames: [GIFFrame]?
+    @State private var currentFrameIndex: Int = 0
+    @State private var animationTimer: Timer?
+
+    var body: some View {
+        ZStack {
+            Color.black
+            imageContent
+            VStack {
+                Spacer()
+                Text(url.lastPathComponent)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.7))
+                    .padding(.bottom, 8)
+            }
+        }
+        .onAppear { loadImage(from: url) }
+        .onDisappear { stopGIFAnimation() }
+    }
+
+    @ViewBuilder
+    private var imageContent: some View {
+        if let frames = gifFrames, !frames.isEmpty {
+            let frame = Image(nsImage: NSImage(cgImage: frames[currentFrameIndex].cgImage, size: .zero))
+            applyEffects(to: frame)
+        } else if let image = nsImage {
+            applyEffects(to: Image(nsImage: image))
+        } else {
+            ProgressView().controlSize(.large)
+        }
+    }
+
+    @ViewBuilder
+    private func applyEffects(to image: Image) -> some View {
+        let base = image.resizable().scaledToFit()
+            .scaleEffect(x: isFlippedHorizontal ? -1 : 1, y: 1)
+        if isInverted && isBlackAndWhite {
+            base.colorInvert().grayscale(1.0)
+        } else if isInverted {
+            base.colorInvert()
+        } else if isBlackAndWhite {
+            base.grayscale(1.0)
+        } else {
+            base
+        }
+    }
+
+    private func loadImage(from url: URL) {
+        DispatchQueue.global(qos: .userInteractive).async {
+            if GIFAnimator.isGIF(url), let frames = GIFAnimator.extractFrames(from: url) {
+                DispatchQueue.main.async {
+                    self.gifFrames = frames
+                    self.currentFrameIndex = 0
+                    self.startGIFAnimation(frames)
+                }
+            } else if let img = NSImage(contentsOf: url) {
+                DispatchQueue.main.async { self.nsImage = img }
+            }
+        }
+    }
+
+    private func stopGIFAnimation() {
+        animationTimer?.invalidate()
+        animationTimer = nil
+    }
+
+    private func startGIFAnimation(_ frames: [GIFFrame]) {
+        stopGIFAnimation()
+        guard !frames.isEmpty else { return }
+        var frameIndex = 0
+        func scheduleNext() {
+            animationTimer = Timer.scheduledTimer(withTimeInterval: frames[frameIndex].duration, repeats: false) { _ in
+                DispatchQueue.main.async {
+                    frameIndex = (frameIndex + 1) % frames.count
+                    self.currentFrameIndex = frameIndex
+                    scheduleNext()
+                }
+            }
+        }
+        scheduleNext()
+    }
+}
+
+struct CompareView: View {
+    let urlA: URL
+    let urlB: URL
+    let onClose: () -> Void
+
+    @State private var isInverted = false
+    @State private var isBlackAndWhite = false
+    @State private var isFlippedHorizontal = false
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            HStack(spacing: 0) {
+                CompareImagePanel(url: urlA,
+                                  isInverted: isInverted,
+                                  isBlackAndWhite: isBlackAndWhite,
+                                  isFlippedHorizontal: isFlippedHorizontal)
+                Rectangle().fill(Color.gray.opacity(0.5)).frame(width: 2)
+                CompareImagePanel(url: urlB,
+                                  isInverted: isInverted,
+                                  isBlackAndWhite: isBlackAndWhite,
+                                  isFlippedHorizontal: isFlippedHorizontal)
+            }
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.largeTitle).foregroundColor(.white).padding()
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .keyboardShortcut(.escape, modifiers: [])
+                }
+                Spacer()
+            }
+            Button { isInverted.toggle() } label: { Text("") }
+                .keyboardShortcut("i", modifiers: [.command]).opacity(0)
+            Button { isBlackAndWhite.toggle() } label: { Text("") }
+                .keyboardShortcut("b", modifiers: [.command]).opacity(0)
+            Button { isFlippedHorizontal.toggle() } label: { Text("") }
+                .keyboardShortcut("h", modifiers: [.command]).opacity(0)
+        }
+    }
+}
+
 struct RubberBandSelectionGesture: ViewModifier {
     @Binding var selectedItemURLs: Set<URL>
     @Binding var activeItemURL: URL?
@@ -914,6 +1051,8 @@ struct GridItemCell: View {
     let performDropAction: (URL) -> Void
     let updateSelectionAnchorAction: (URL) -> Void
     let isActive: Bool
+    let canCompare: Bool
+    let compareAction: () -> Void
 
     @State private var isTargeted: Bool = false
 
@@ -1010,6 +1149,12 @@ struct GridItemCell: View {
                 }
                 Button { openWithLightroomAction(item.url) } label: {
                     Label("Open with Lightroom", systemImage: "camera.aperture")
+                }
+            }
+            if canCompare {
+                Divider()
+                Button { compareAction() } label: {
+                    Label("Compare", systemImage: "square.split.2x1")
                 }
             }
             Divider()
@@ -1142,6 +1287,16 @@ class ContextMenuHandler: NSObject {
         DispatchQueue.main.async {
             guard let url = self.session?.activeItemURL else { return }
             self.session?.openWithLightroom(url)
+        }
+    }
+    @objc func compare() {
+        DispatchQueue.main.async {
+            guard let session = self.session else { return }
+            let urls = Array(session.selectedItemURLs)
+                .filter { url in session.folderContents.first(where: { $0.url == url })?.isDirectory == false }
+            if urls.count == 2 {
+                session.compareImageURLs = urls
+            }
         }
     }
 }
@@ -1431,6 +1586,16 @@ struct ContentView: View {
         menu.addItem(withTitle: "Select All Items", action: #selector(ContextMenuHandler.selectAll), keyEquivalent: "").target = handler
         menu.addItem(withTitle: "Select All (Items & Folders)", action: #selector(ContextMenuHandler.selectAllWithFolders), keyEquivalent: "").target = handler
 
+        if session.selectedItemURLs.count == 2 &&
+           session.selectedItemURLs.allSatisfy({ url in
+               session.folderContents.first(where: { $0.url == url })?.isDirectory == false
+           }) {
+            menu.addItem(NSMenuItem.separator())
+            let compareItem = NSMenuItem(title: "Compare", action: #selector(ContextMenuHandler.compare), keyEquivalent: "")
+            compareItem.target = handler
+            menu.addItem(compareItem)
+        }
+
         // Convert SwiftUI global frame to screen coordinates for NSMenu positioning
         // SwiftUI global space has origin at top-left of window content; NSScreen at bottom-left
         let screenPoint: NSPoint
@@ -1559,6 +1724,29 @@ struct ContentView: View {
         }
     }
 
+    private var notificationOverlay: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                if let msg = activeSession().notificationMessage {
+                    Text(msg)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.black.opacity(0.8))
+                        .cornerRadius(8)
+                        .shadow(radius: 4)
+                        .padding(.bottom, 30)
+                        .padding(.trailing, 20)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        .zIndex(1)
+                }
+            }
+        }
+    }
+
     private var statusBar: some View {
         VStack(spacing: 0) {
             Divider()
@@ -1617,182 +1805,146 @@ struct ContentView: View {
         }
     }
 
-    var body: some View {
+    @ViewBuilder
+    private func browserContent(width: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            leftPanel
+                .frame(width: width * 0.1)
+            if isSplitViewEnabled {
+                HSplitView {
+                    PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
+                        .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
+                        .simultaneousGesture(TapGesture().onEnded { activePane = .left })
+                        .overlay(alignment: .top) {
+                            if activePane == .left {
+                                Rectangle().fill(Color.blue).frame(height: 2)
+                            }
+                        }
+                    PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelectionRight, session: sessionRight)
+                        .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
+                        .simultaneousGesture(TapGesture().onEnded { activePane = .right })
+                        .overlay(alignment: .top) {
+                            if activePane == .right {
+                                Rectangle().fill(Color.blue).frame(height: 2)
+                            }
+                        }
+                }
+            } else {
+                PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private var mainLayout: some View {
         GeometryReader { mainGeometry in
             ZStack {
-                HStack(spacing: 0) {
-                    leftPanel
-                        .frame(width: mainGeometry.size.width * 0.1)
-
-                    if isSplitViewEnabled {
-                        HSplitView {
-                            PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
-                                .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
-                                .simultaneousGesture(TapGesture().onEnded { activePane = .left })
-                                .overlay(alignment: .top) {
-                                    if activePane == .left {
-                                        Rectangle()
-                                            .fill(Color.blue)
-                                            .frame(height: 2)
-                                    }
-                                }
-                            PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelectionRight, session: sessionRight)
-                                .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
-                                .simultaneousGesture(TapGesture().onEnded { activePane = .right })
-                                .overlay(alignment: .top) {
-                                    if activePane == .right {
-                                        Rectangle()
-                                            .fill(Color.blue)
-                                            .frame(height: 2)
-                                    }
-                                }
-                        }
-                    } else {
-                        PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                }
-                
-                // Full screen presentation is now handled via .onChange of session.fullScreenImageURL
-
-                
+                browserContent(width: mainGeometry.size.width)
                 shortcutsGroup
-
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        if let msg = activeSession().notificationMessage {
-                            Text(msg)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
-                                .background(Color.black.opacity(0.8))
-                                .cornerRadius(8)
-                                .shadow(radius: 4)
-                                .padding(.bottom, 30)
-                                .padding(.trailing, 20)
-                                .transition(.opacity.combined(with: .move(edge: .bottom)))
-                                .zIndex(1)
-                        }
-                    }
-                }
-
+                notificationOverlay
             }
-            .safeAreaInset(edge: .bottom) {
-                statusBar
-            }
+            .safeAreaInset(edge: .bottom) { statusBar }
             .frame(width: mainGeometry.size.width, height: mainGeometry.size.height)
         }
-        .onPreferenceChange(ActiveItemFrameKey.self) { frame in
-            if frame != .zero {
-                activeItemGlobalFrame = frame
+    }
+
+    private var layoutWithSessionObservers: some View {
+        mainLayout
+            .onChange(of: sidebarSelection) { _, newURL in
+                if let url = newURL { session.loadFolder(url: url, sidebarManager: sidebarManager) }
             }
-        }
-        .preferredColorScheme(.dark)
-        .onChange(of: sidebarSelection) { oldURL, newURL in
-            if let url = newURL {
-                session.loadFolder(url: url, sidebarManager: sidebarManager)
+            .onChange(of: sidebarSelectionRight) { _, newURL in
+                if let url = newURL { sessionRight.loadFolder(url: url, sidebarManager: sidebarManager) }
             }
-        }
-        .onChange(of: sidebarSelectionRight) { oldURL, newURL in
-            if let url = newURL {
-                sessionRight.loadFolder(url: url, sidebarManager: sidebarManager)
+            .onChange(of: session.fullScreenImageURL) { _, newURL in
+                if let url = newURL {
+                    ImmersiveWindowController.shared.show {
+                        FullScreenImageView(url: url, onClose: { session.fullScreenImageURL = nil },
+                                            navigateImage: { session.navigateFullScreen(direction: $0) })
+                    }
+                } else { ImmersiveWindowController.shared.hide() }
             }
-        }
-        .onChange(of: session.fullScreenImageURL) { oldURL, newURL in
-            if let url = newURL {
-                ImmersiveWindowController.shared.show {
-                    FullScreenImageView(url: url, onClose: {
-                        session.fullScreenImageURL = nil
-                    }, navigateImage: { direction in
-                        session.navigateFullScreen(direction: direction)
-                    })
-                }
-            } else {
-                ImmersiveWindowController.shared.hide()
+            .onChange(of: session.activeItemURL) { _, newURL in session.updateMetadata(for: newURL) }
+            .onChange(of: sessionRight.fullScreenImageURL) { _, newURL in
+                if let url = newURL {
+                    ImmersiveWindowController.shared.show {
+                        FullScreenImageView(url: url, onClose: { sessionRight.fullScreenImageURL = nil },
+                                            navigateImage: { sessionRight.navigateFullScreen(direction: $0) })
+                    }
+                } else if session.fullScreenImageURL == nil { ImmersiveWindowController.shared.hide() }
             }
-        }
-        .onChange(of: session.activeItemURL) { oldURL, newURL in
-            session.updateMetadata(for: newURL)
-        }
-        .onChange(of: sessionRight.fullScreenImageURL) { oldURL, newURL in
-            if let url = newURL {
-                ImmersiveWindowController.shared.show {
-                    FullScreenImageView(url: url, onClose: {
-                        sessionRight.fullScreenImageURL = nil
-                    }, navigateImage: { direction in
-                        sessionRight.navigateFullScreen(direction: direction)
-                    })
-                }
-            } else {
-                if session.fullScreenImageURL == nil {
+            .onChange(of: sessionRight.activeItemURL) { _, newURL in sessionRight.updateMetadata(for: newURL) }
+            .onChange(of: session.compareImageURLs) { _, newURLs in
+                if let urls = newURLs, urls.count == 2 {
+                    ImmersiveWindowController.shared.show {
+                        CompareView(urlA: urls[0], urlB: urls[1], onClose: { session.compareImageURLs = nil })
+                    }
+                } else if newURLs == nil && session.fullScreenImageURL == nil {
                     ImmersiveWindowController.shared.hide()
                 }
             }
-        }
-        .onChange(of: sessionRight.activeItemURL) { oldURL, newURL in
-            sessionRight.updateMetadata(for: newURL)
-        }
-        .onOpenURL { url in
-            let dir = url.deletingLastPathComponent()
-            sidebarSelection = dir
-            session.activeItemURL = url
-            session.selectedItemURLs = [url]
-            session.fullScreenImageURL = url
-        }
-        .sheet(isPresented: $session.isShowingProperties) {
-            if let url = session.propertiesURL {
-                PropertiesView(url: url)
-            }
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button(action: {
-                    clearApplicationMemory()
-                }) {
-                    Label("Clear Memory", systemImage: "arrow.clockwise")
-                }
-                .help("Clear Cache & Free Memory")
-                
-                Button(action: {
-                    withAnimation {
-                        isSplitViewEnabled.toggle()
-                        if isSplitViewEnabled, let currentURL = session.currentFolderURL {
-                            sessionRight.loadFolder(url: currentURL, sidebarManager: sidebarManager)
-                        }
+            .onChange(of: sessionRight.compareImageURLs) { _, newURLs in
+                if let urls = newURLs, urls.count == 2 {
+                    ImmersiveWindowController.shared.show {
+                        CompareView(urlA: urls[0], urlB: urls[1], onClose: { sessionRight.compareImageURLs = nil })
                     }
-                }) {
-                    Label("Split View", systemImage: isSplitViewEnabled ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
+                } else if newURLs == nil && sessionRight.fullScreenImageURL == nil {
+                    ImmersiveWindowController.shared.hide()
                 }
-                .keyboardShortcut("s", modifiers: [.command])
-                
-                Button(action: {
-                    isShowingFolderPicker = true
-                }) {
-                    Label("Select Folder", systemImage: "folder.badge.plus")
+            }
+    }
+
+    var body: some View {
+        layoutWithSessionObservers
+            .onPreferenceChange(ActiveItemFrameKey.self) { frame in
+                if frame != .zero { activeItemGlobalFrame = frame }
+            }
+            .preferredColorScheme(.dark)
+            .onOpenURL { url in
+                sidebarSelection = url.deletingLastPathComponent()
+                session.activeItemURL = url
+                session.selectedItemURLs = [url]
+                session.fullScreenImageURL = url
+            }
+            .sheet(isPresented: $session.isShowingProperties) {
+                if let url = session.propertiesURL { PropertiesView(url: url) }
+            }
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { clearApplicationMemory() } label: {
+                        Label("Clear Memory", systemImage: "arrow.clockwise")
+                    }
+                    .help("Clear Cache & Free Memory")
+                    Button {
+                        withAnimation {
+                            isSplitViewEnabled.toggle()
+                            if isSplitViewEnabled, let url = session.currentFolderURL {
+                                sessionRight.loadFolder(url: url, sidebarManager: sidebarManager)
+                            }
+                        }
+                    } label: {
+                        Label("Split View", systemImage: isSplitViewEnabled ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
+                    }
+                    .keyboardShortcut("s", modifiers: [.command])
+                    Button { isShowingFolderPicker = true } label: {
+                        Label("Select Folder", systemImage: "folder.badge.plus")
+                    }
+                    .keyboardShortcut("o", modifiers: [.command])
                 }
-                .keyboardShortcut("o", modifiers: [.command])
             }
-        }
-        .onAppear {
-            setupKeyboardMonitor()
-            session.sidebarManager = sidebarManager
-            sessionRight.sidebarManager = sidebarManager
-            if session.currentFolderURL == nil {
-                let initialURL = session.restoreBookmark() ?? FileManager.default.homeDirectoryForCurrentUser
-                sidebarSelection = initialURL
+            .onAppear {
+                setupKeyboardMonitor()
+                session.sidebarManager = sidebarManager
+                sessionRight.sidebarManager = sidebarManager
+                if session.currentFolderURL == nil {
+                    sidebarSelection = session.restoreBookmark() ?? FileManager.default.homeDirectoryForCurrentUser
+                }
+                if sessionRight.currentFolderURL == nil {
+                    sidebarSelectionRight = sessionRight.restoreBookmark() ?? FileManager.default.homeDirectoryForCurrentUser
+                }
+                updateWindowTitle()
             }
-            if sessionRight.currentFolderURL == nil {
-                let initialURLRight = sessionRight.restoreBookmark() ?? FileManager.default.homeDirectoryForCurrentUser
-                sidebarSelectionRight = initialURLRight
-            }
-            updateWindowTitle()
-        }
-        .onChange(of: activeSession().currentFolderURL) { _, _ in
-            updateWindowTitle()
-        }
+            .onChange(of: activeSession().currentFolderURL) { _, _ in updateWindowTitle() }
     }
     
     }
