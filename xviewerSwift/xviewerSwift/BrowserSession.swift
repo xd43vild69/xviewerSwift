@@ -437,13 +437,20 @@ func copySelectedItemToClipboard() {
         guard let data = UserDefaults.standard.data(forKey: "lastFolderBookmark") else { return nil }
         var isStale = false
         do {
-            let url = try URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale)
+            let url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &isStale)
+            
+            guard (try? url.checkResourceIsReachable()) == true else {
+                UserDefaults.standard.removeObject(forKey: "lastFolderBookmark")
+                return nil
+            }
+            
             if isStale {
                 saveBookmark(for: url)
             }
             return url
         } catch {
             print("Failed to restore secure last folder bookmark: \(error)")
+            UserDefaults.standard.removeObject(forKey: "lastFolderBookmark")
             return nil
         }
     }
@@ -1054,6 +1061,38 @@ func copySelectedItemToClipboard() {
     func loadFolder(url: URL, sidebarManager: SidebarManager?, pushToHistory: Bool = true) {
         loadTask?.cancel()
 
+        // Quick SMB connectivity check - fallback to home if unavailable
+        if isSMBPath(url) {
+            loadTask = Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else { return }
+                let isConnected = await self.checkSMBConnectivity(url)
+
+                if Task.isCancelled { return }
+
+                if !isConnected {
+                    await MainActor.run {
+                        self.showNotification("⚠️ Network folder unavailable - loading home")
+                    }
+                    // Recursively load home instead
+                    let homeURL = FileManager.default.homeDirectoryForCurrentUser
+                    await MainActor.run {
+                        self.loadFolder(url: homeURL, sidebarManager: sidebarManager, pushToHistory: pushToHistory)
+                    }
+                    return
+                }
+
+                // If connected, proceed with normal loading
+                await MainActor.run {
+                    self.performLoadFolder(url: url, sidebarManager: sidebarManager, pushToHistory: pushToHistory)
+                }
+            }
+            return
+        }
+
+        performLoadFolder(url: url, sidebarManager: sidebarManager, pushToHistory: pushToHistory)
+    }
+
+    private func performLoadFolder(url: URL, sidebarManager: SidebarManager?, pushToHistory: Bool) {
         // Registrar la visita usando el manager pasado o la referencia guardada,
         // para que TODA navegación (doble-clic, Enter, subir a padre) cuente.
         (sidebarManager ?? self.sidebarManager)?.recordRecentVisit(url: url)
@@ -1202,6 +1241,27 @@ func copySelectedItemToClipboard() {
         self.folderHistory.removeAll()
         if let current = self.currentFolderURL {
             self.loadFolder(url: current, sidebarManager: nil)
+        }
+    }
+
+    // MARK: - SMB Connectivity Check
+
+    private func isSMBPath(_ url: URL) -> Bool {
+        let pathString = url.path.lowercased()
+        return pathString.hasPrefix("/volumes/") && (pathString.contains("smb") || pathString.contains("cifs"))
+    }
+
+    private func checkSMBConnectivity(_ url: URL) async -> Bool {
+        guard isSMBPath(url) else { return true }
+
+        let timeoutSeconds: TimeInterval = 2.0
+        do {
+            _ = try await withTimeout(timeoutSeconds) {
+                try FileManager.default.attributesOfFileSystem(forPath: url.path)
+            }
+            return true
+        } catch {
+            return false
         }
     }
 

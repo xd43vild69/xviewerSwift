@@ -1074,6 +1074,56 @@ extension EnvironmentValues {
     }
 }
 
+class ContextMenuHandler: NSObject {
+    var session: BrowserSession?
+
+    @objc func sortByName() {
+        DispatchQueue.main.async {
+            self.session?.currentSortOrder = .name
+        }
+    }
+    @objc func sortByDate() {
+        DispatchQueue.main.async {
+            self.session?.currentSortOrder = .date
+        }
+    }
+    @objc func sortBySize() {
+        DispatchQueue.main.async {
+            self.session?.currentSortOrder = .size
+        }
+    }
+    @objc func createNewFolder() {
+        DispatchQueue.main.async {
+            self.session?.createNewFolder()
+        }
+    }
+    @objc func newFolderWithSelection() {
+        DispatchQueue.main.async {
+            self.session?.createNewFolderWithSelection()
+        }
+    }
+    @objc func renameSelected() {
+        DispatchQueue.main.async {
+            self.session?.renameSelected()
+        }
+    }
+    @objc func deleteSelected() {
+        DispatchQueue.main.async {
+            self.session?.deleteSelectedItem()
+        }
+    }
+    @objc func selectAll() {
+        DispatchQueue.main.async {
+            self.session?.selectAllItems()
+        }
+    }
+    @objc func selectAllWithFolders() {
+        DispatchQueue.main.async {
+            self.session?.selectAllItemsAndFolders()
+        }
+    }
+}
+
 
 enum ActivePane {
     case left
@@ -1203,6 +1253,9 @@ struct ContentView: View {
                     } else if chars == "c" {
                         activeSession().copySelectedItemToClipboard()
                         return nil
+                    } else if chars == "/" {
+                        showContextMenu()
+                        return nil
                     }
                 }
                 let optionPressed = event.modifierFlags.contains(.option)
@@ -1291,6 +1344,45 @@ struct ContentView: View {
             sessionRight.clearMemory()
         }
         activeSession().showNotification("🧹 Free memory")
+    }
+
+    private func showContextMenu() {
+        let menu = NSMenu()
+        let session = activeSession()
+        let handler = ContextMenuHandler()
+        handler.session = session
+
+        // Sort options
+        let sortMenu = NSMenu()
+        sortMenu.addItem(withTitle: "Name", action: #selector(ContextMenuHandler.sortByName), keyEquivalent: "").target = handler
+        sortMenu.addItem(withTitle: "Date", action: #selector(ContextMenuHandler.sortByDate), keyEquivalent: "").target = handler
+        sortMenu.addItem(withTitle: "Size", action: #selector(ContextMenuHandler.sortBySize), keyEquivalent: "").target = handler
+
+        let sortItem = NSMenuItem(title: "Sort By", action: nil, keyEquivalent: "")
+        sortItem.submenu = sortMenu
+        menu.addItem(sortItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Navigation options
+        menu.addItem(withTitle: "New Folder", action: #selector(ContextMenuHandler.createNewFolder), keyEquivalent: "").target = handler
+
+        if !session.selectedItemURLs.isEmpty {
+            menu.addItem(withTitle: "New Folder with Selection", action: #selector(ContextMenuHandler.newFolderWithSelection), keyEquivalent: "").target = handler
+        }
+
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Rename", action: #selector(ContextMenuHandler.renameSelected), keyEquivalent: "").target = handler
+        menu.addItem(withTitle: "Delete", action: #selector(ContextMenuHandler.deleteSelected), keyEquivalent: "").target = handler
+
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Select All Items", action: #selector(ContextMenuHandler.selectAll), keyEquivalent: "").target = handler
+        menu.addItem(withTitle: "Select All (Items & Folders)", action: #selector(ContextMenuHandler.selectAllWithFolders), keyEquivalent: "").target = handler
+
+        // Show menu at mouse position
+        if let view = NSApp.keyWindow?.contentView {
+            NSMenu.popUpContextMenu(menu, with: NSApp.currentEvent ?? NSEvent(), for: view)
+        }
     }
 
     private func updateWindowTitle() {
