@@ -4,7 +4,7 @@
 
 🔴 - Cuando se mueve un archivo jpeg, validar si existe un archivo raw .cr2 con el mismo nombre y mover los dos a la carpeta para mantener sincronizacion, lo mismo al copiar
 
-🔴 - deshacer ultima accion
+
 
 ---
 

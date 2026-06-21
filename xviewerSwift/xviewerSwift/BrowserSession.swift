@@ -69,7 +69,7 @@ class ThumbnailLoader {
 // MARK: - Undo/Redo Types
 enum FileOperationType {
     case move(sources: [URL], destination: URL)
-    case copy(destination: URL)
+    case copy(destinations: [URL])
     case rename(source: URL, oldName: String)
     case createFolder(folderURL: URL)
     case delete(source: URL)
@@ -84,7 +84,9 @@ struct UndoableAction {
         case .move(let sources, _):
             let count = sources.count
             return count == 1 ? "Moved '\(sources[0].lastPathComponent)'" : "Moved \(count) items"
-        case .copy: return "Copied file"
+        case .copy(let destinations):
+            let count = destinations.count
+            return count == 1 ? "Copied '\(destinations[0].lastPathComponent)'" : "Copied \(count) items"
         case .rename(_, let oldName): return "Renamed '\(oldName)'"
         case .createFolder(let url): return "Created '\(url.lastPathComponent)'"
         case .delete(let source): return "Deleted '\(source.lastPathComponent)'"
@@ -223,19 +225,25 @@ func copySelectedItemToClipboard() {
                     NSSound.beep()
                 }
             } else {
+                var copiedDestinations: [URL] = []
                 for sourceURL in fileURLs {
                     let destinationURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
                     do {
                         if !FileManager.default.fileExists(atPath: destinationURL.path) {
                             try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
                             pastedSomething = true
-                            recordOperation(.copy(destination: destinationURL))
+                            copiedDestinations.append(destinationURL)
                         }
                     } catch {
                         print("Error copying file: \(error)")
                     }
                 }
-                
+
+                // Register ONE action for ALL copied files
+                if !copiedDestinations.isEmpty {
+                    recordOperation(.copy(destinations: copiedDestinations))
+                }
+
                 if pastedSomething {
                     loadFolder(url: targetFolder, sidebarManager: nil)
                 } else {
@@ -1391,11 +1399,14 @@ func copySelectedItemToClipboard() {
                     }
                 }
 
-            case .copy(let destination):
+            case .copy(let destinations):
                 do {
-                    try FileManager.default.removeItem(at: destination)
+                    // Delete ALL copied files
+                    for destination in destinations {
+                        try FileManager.default.removeItem(at: destination)
+                    }
                     DispatchQueue.main.async {
-                        self?.showNotification("✅ Undo: Copy deleted")
+                        self?.showNotification("✅ Undo: \(action.actionDescription)")
                         if let currentFolder = self?.currentFolderURL {
                             self?.loadFolder(url: currentFolder, sidebarManager: nil)
                         }
