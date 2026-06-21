@@ -129,6 +129,7 @@ struct SettingsView: View {
                     ShortcutRow(action: "Rename Item", key: "F2")
                     ShortcutRow(action: "Copy Item", key: "Cmd + C")
                     ShortcutRow(action: "Paste Item", key: "Cmd + V")
+                    ShortcutRow(action: "Undo Last Action", key: "Cmd + Z")
                 }
                 
                 Divider().padding(.vertical, 4)
@@ -138,6 +139,8 @@ struct SettingsView: View {
                     ShortcutRow(action: "Open Selected", key: "Enter / Space")
                     ShortcutRow(action: "Navigate Items", key: "Arrow Keys")
                     ShortcutRow(action: "Navigate Up", key: "Cmd + Up")
+                    ShortcutRow(action: "Navigate Back", key: "Cmd + Left")
+                    ShortcutRow(action: "Navigate Forward", key: "Cmd + Right")
                     ShortcutRow(action: "Navigate to First", key: "Cmd + Shift + Up")
                     ShortcutRow(action: "Navigate to Last", key: "Cmd + Shift + Down")
                 }
@@ -162,6 +165,7 @@ struct SettingsView: View {
                     ShortcutRow(action: "Rotate Image Left", key: "Cmd + Left")
                     ShortcutRow(action: "Rotate Image Right", key: "Cmd + Right")
                     ShortcutRow(action: "Reset Image Rotation", key: "Delete")
+                    ShortcutRow(action: "Cycle Background Color", key: "Cmd + 1")
                 }
             }
             .padding()
