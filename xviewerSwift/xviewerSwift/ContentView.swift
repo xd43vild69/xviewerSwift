@@ -1508,6 +1508,12 @@ struct ContentView: View {
                         if event.keyCode == 126 { // Up arrow
                             activeSession().navigateUp()
                             return nil
+                        } else if event.keyCode == 33 { // [ bracket
+                            activeSession().navigateToFirst()
+                            return nil
+                        } else if event.keyCode == 30 { // ] bracket
+                            activeSession().navigateToLast()
+                            return nil
                         } else if event.keyCode == 123 { // Left arrow
                             if activeSession().fullScreenImageURL == nil {
                                 activeSession().goBack()

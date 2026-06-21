@@ -141,8 +141,8 @@ struct SettingsView: View {
                     ShortcutRow(action: "Navigate Up", key: "Cmd + Up")
                     ShortcutRow(action: "Navigate Back", key: "Cmd + Left")
                     ShortcutRow(action: "Navigate Forward", key: "Cmd + Right")
-                    ShortcutRow(action: "Navigate to First", key: "Cmd + Shift + Up")
-                    ShortcutRow(action: "Navigate to Last", key: "Cmd + Shift + Down")
+                    ShortcutRow(action: "Navigate to First", key: "Cmd + [ (or Cmd + Shift + Up)")
+                    ShortcutRow(action: "Navigate to Last", key: "Cmd + ] (or Cmd + Shift + Down)")
                 }
                 
                 Divider().padding(.vertical, 4)
