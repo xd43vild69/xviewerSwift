@@ -913,9 +913,10 @@ struct GridItemCell: View {
     let isSingleSelection: Bool
     let performDropAction: (URL) -> Void
     let updateSelectionAnchorAction: (URL) -> Void
+    let isActive: Bool
 
     @State private var isTargeted: Bool = false
-    
+
     var body: some View {
         VStack {
             if item.isDirectory {
@@ -932,6 +933,14 @@ struct GridItemCell: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: ActiveItemFrameKey.self,
+                    value: isActive ? geo.frame(in: .global) : .zero
+                )
+            }
+        )
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 8)
@@ -1076,6 +1085,7 @@ extension EnvironmentValues {
 
 class ContextMenuHandler: NSObject {
     var session: BrowserSession?
+    var sidebarManager: SidebarManager?
 
     @objc func sortByName() {
         DispatchQueue.main.async {
@@ -1122,8 +1132,28 @@ class ContextMenuHandler: NSObject {
             self.session?.selectAllItemsAndFolders()
         }
     }
+    @objc func openWithKrita() {
+        DispatchQueue.main.async {
+            guard let url = self.session?.activeItemURL else { return }
+            self.session?.openWithKrita(url)
+        }
+    }
+    @objc func openWithLightroom() {
+        DispatchQueue.main.async {
+            guard let url = self.session?.activeItemURL else { return }
+            self.session?.openWithLightroom(url)
+        }
+    }
 }
 
+
+struct ActiveItemFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero { value = next }
+    }
+}
 
 enum ActivePane {
     case left
@@ -1140,6 +1170,7 @@ struct ContentView: View {
     @State private var isSplitViewEnabled = false
     @State private var activePane: ActivePane = .left
     @State private var currentColumnCount: Int = 1
+    @State private var activeItemGlobalFrame: CGRect = .zero
 
     private var activeSidebarSelectionBinding: Binding<URL?> {
         Binding<URL?>(
@@ -1347,10 +1378,12 @@ struct ContentView: View {
     }
 
     private func showContextMenu() {
-        let menu = NSMenu()
         let session = activeSession()
         let handler = ContextMenuHandler()
         handler.session = session
+        handler.sidebarManager = sidebarManager
+
+        let menu = NSMenu()
 
         // Sort options
         let sortMenu = NSMenu()
@@ -1364,11 +1397,30 @@ struct ContentView: View {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Navigation options
+        // Basic options
         menu.addItem(withTitle: "New Folder", action: #selector(ContextMenuHandler.createNewFolder), keyEquivalent: "").target = handler
 
         if !session.selectedItemURLs.isEmpty {
-            menu.addItem(withTitle: "New Folder with Selection", action: #selector(ContextMenuHandler.newFolderWithSelection), keyEquivalent: "").target = handler
+            menu.addItem(withTitle: "New Folder with Selection (\(session.selectedItemURLs.count) items)", action: #selector(ContextMenuHandler.newFolderWithSelection), keyEquivalent: "").target = handler
+        }
+
+        // Check if there's an active item
+        if let activeItem = session.activeItemURL,
+           let item = session.folderContents.first(where: { $0.url == activeItem }) {
+
+            menu.addItem(NSMenuItem.separator())
+
+            // Folder-specific options
+            if item.isDirectory {
+                menu.addItem(withTitle: "Add to Bookmarks", action: nil, keyEquivalent: "")
+            }
+
+            // Image-specific options
+            if !item.isDirectory {
+                menu.addItem(NSMenuItem.separator())
+                menu.addItem(withTitle: "Open with Krita", action: #selector(ContextMenuHandler.openWithKrita), keyEquivalent: "").target = handler
+                menu.addItem(withTitle: "Open with Lightroom", action: #selector(ContextMenuHandler.openWithLightroom), keyEquivalent: "").target = handler
+            }
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -1379,9 +1431,36 @@ struct ContentView: View {
         menu.addItem(withTitle: "Select All Items", action: #selector(ContextMenuHandler.selectAll), keyEquivalent: "").target = handler
         menu.addItem(withTitle: "Select All (Items & Folders)", action: #selector(ContextMenuHandler.selectAllWithFolders), keyEquivalent: "").target = handler
 
-        // Show menu at mouse position
+        // Convert SwiftUI global frame to screen coordinates for NSMenu positioning
+        // SwiftUI global space has origin at top-left of window content; NSScreen at bottom-left
+        let screenPoint: NSPoint
+        if let window = NSApp.keyWindow, activeItemGlobalFrame != .zero {
+            let contentHeight = window.contentView?.bounds.height ?? 0
+            let windowOrigin = window.frame.origin
+            // SwiftUI Y increases downward; NSWindow Y increases upward — flip
+            let nsWindowY = contentHeight - activeItemGlobalFrame.maxY
+            screenPoint = NSPoint(
+                x: windowOrigin.x + activeItemGlobalFrame.midX,
+                y: windowOrigin.y + nsWindowY
+            )
+        } else {
+            screenPoint = NSEvent.mouseLocation
+        }
+
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: screenPoint,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: NSApp.keyWindow?.windowNumber ?? 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 0
+        ) ?? NSEvent()
+
         if let view = NSApp.keyWindow?.contentView {
-            NSMenu.popUpContextMenu(menu, with: NSApp.currentEvent ?? NSEvent(), for: view)
+            NSMenu.popUpContextMenu(menu, with: event, for: view)
         }
     }
 
@@ -1605,6 +1684,11 @@ struct ContentView: View {
                 statusBar
             }
             .frame(width: mainGeometry.size.width, height: mainGeometry.size.height)
+        }
+        .onPreferenceChange(ActiveItemFrameKey.self) { frame in
+            if frame != .zero {
+                activeItemGlobalFrame = frame
+            }
         }
         .preferredColorScheme(.dark)
         .onChange(of: sidebarSelection) { oldURL, newURL in

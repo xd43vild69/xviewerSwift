@@ -1,18 +1,17 @@
 🔴  ---
 
-
-cuando estoy en un panel activo y cambio el nombre de un archivo quiero que el foco al terminar la accion pase al archivo anterior y si no hay uno anterior al siguiente
-
-cuando muevo un archivo en un panel activo, debe quedar en foco el archivo anterior en el panel activo o el siguiente en caso que no exista el anterior o ninguno si no hay mas archivos
+Rename app
 
 
-10. **Etiquetas o Clasificación:** Poder ponerles estrellas (del 1 al 5) o etiquetas de colores tipo Finder a las imágenes para organizarlas mejor.
-
+Al seleccionar dos imagenes, en el context menu puede aparecer Compare, y alli en una ventana similar a full view, se presentan las dos imagenes.
 
 4. **Deshacer (Undo):** Implementar el clásico `Cmd + Z`. Si borraste una imagen o la moviste por accidente, poder revertir esa acción de forma inmediata.
 
+
 7. **Refresco Automático:** Si otra aplicación o el Finder crea o elimina un archivo en la carpeta que estás viendo, nuestra app debería detectarlo y actualizarse automáticamente sin tener que recargar la carpeta de forma manual.
 
+
+10. **Etiquetas o Clasificación:** Poder ponerles estrellas (del 1 al 5) o etiquetas de colores tipo Finder a las imágenes para organizarlas mejor.
 
 
 Listed directory xviewerSwift

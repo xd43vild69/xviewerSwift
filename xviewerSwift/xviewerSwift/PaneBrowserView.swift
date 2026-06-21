@@ -67,7 +67,8 @@ struct PaneBrowserView: View {
                                 },
                                 updateSelectionAnchorAction: { url in
                                     session.updateSelectionAnchor(url)
-                                }
+                                },
+                                isActive: session.activeItemURL == item.url
                             )
                             .id(item.url)
                         }
