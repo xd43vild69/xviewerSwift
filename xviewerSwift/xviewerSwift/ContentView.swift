@@ -1346,6 +1346,7 @@ enum ActivePane {
 struct ContentView: View {
     @StateObject private var sidebarManager = SidebarManager()
     @State private var isShowingFolderPicker = false
+    @State private var isShowingSettings = false
     @State private var sidebarSelection: URL?
     @State private var sidebarSelectionRight: URL?
     @StateObject private var session = BrowserSession()
@@ -1578,7 +1579,7 @@ struct ContentView: View {
         if isSplitViewEnabled {
             sessionRight.clearMemory()
         }
-        activeSession().showNotification("🧹 Free memory")
+        activeSession().showNotification("🧹 Cleaned: Thumbnails • History • Undo • Cache")
     }
 
     private func showContextMenu() {
@@ -2056,7 +2057,14 @@ struct ContentView: View {
                         Label("Select Folder", systemImage: "folder.badge.plus")
                     }
                     .keyboardShortcut("o", modifiers: [.command])
+                    Button { isShowingSettings = true } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .help("Settings")
                 }
+            }
+            .sheet(isPresented: $isShowingSettings) {
+                SettingsView()
             }
             .onAppear {
                 setupKeyboardMonitor()

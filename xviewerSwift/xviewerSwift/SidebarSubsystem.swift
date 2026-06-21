@@ -280,12 +280,10 @@ struct SidebarNavigationView: View {
     @ObservedObject var manager: SidebarManager
     @Binding var selectedFolderURL: URL?
     var performDropAction: ((URL) -> Void)?
-    
-    @State private var isShowingSettings = false
-    
+
     var body: some View {
         List(selection: $selectedFolderURL) {
-            
+
             // Sección: Fuentes
             Section(header: Text(SidebarSection.sources.rawValue)) {
                 ForEach(manager.sources) { item in
@@ -293,7 +291,7 @@ struct SidebarNavigationView: View {
                         .tag(item.url)
                 }
             }
-            
+
             // Sección: Marcadores
             Section(header: Text(SidebarSection.bookmarks.rawValue)) {
                 ForEach(manager.bookmarks) { item in
@@ -308,7 +306,7 @@ struct SidebarNavigationView: View {
                         }
                 }
             }
-            
+
             // Sección: Recientes
             Section(header: Text(SidebarSection.recent.rawValue)) {
                 ForEach(manager.recent) { item in
@@ -318,25 +316,6 @@ struct SidebarNavigationView: View {
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            HStack {
-                Button(action: {
-                    isShowingSettings = true
-                }) {
-                    Image(systemName: "gearshape")
-                        .foregroundColor(.secondary)
-                        .imageScale(.large)
-                }
-                .buttonStyle(PlainButtonStyle())
-                .padding()
-                
-                Spacer()
-            }
-            .background(Color(NSColor.windowBackgroundColor))
-        }
-        .sheet(isPresented: $isShowingSettings) {
-            SettingsView()
-        }
     }
 }
 

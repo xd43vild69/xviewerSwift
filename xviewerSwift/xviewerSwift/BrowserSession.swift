@@ -1290,7 +1290,35 @@ func copySelectedItemToClipboard() {
     }
 
     func clearMemory() {
-        self.folderHistory.removeAll()
+        // 1. Clear navigation & history
+        navigationHistory.removeAll()
+        navigationIndex = -1
+        folderHistory.removeAll()
+
+        // 2. Clear undo/redo history (aggressive memory cleanup)
+        undoHistory.removeAll()
+        canUndo = false
+
+        // 3. Clear selections & temp states
+        selectedItemURLs.removeAll()
+        selectionAnchorURL = nil
+        selectionAnchorIndex = nil
+        selectionBaseURLs.removeAll()
+
+        // 4. Clear compare mode
+        compareImageURLs = nil
+
+        // 5. Clear metadata cache
+        metadataString = ""
+
+        // 6. Close any open dialogs/alerts
+        isShowingProperties = false
+        propertiesURL = nil
+        isShowingSingleRenameAlert = false
+        isShowingBulkRenameAlert = false
+        notificationMessage = nil
+
+        // 7. Reload current folder to refresh display
         if let current = self.currentFolderURL {
             self.loadFolder(url: current, sidebarManager: nil)
         }
