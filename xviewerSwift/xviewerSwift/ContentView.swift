@@ -1464,6 +1464,9 @@ struct ContentView: View {
                     } else if chars == "/" {
                         showContextMenu()
                         return nil
+                    } else if chars == "z" {
+                        activeSession().undoLastAction()
+                        return nil
                     }
                 }
                 let optionPressed = event.modifierFlags.contains(.option)

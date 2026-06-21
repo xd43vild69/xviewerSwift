@@ -1355,7 +1355,10 @@ func copySelectedItemToClipboard() {
     }
 
     func undoLastAction() {
-        guard !undoHistory.isEmpty else { return }
+        guard !undoHistory.isEmpty else {
+            showNotification("⚠️ No undo operation available")
+            return
+        }
 
         let action = undoHistory.removeLast()
         canUndo = !undoHistory.isEmpty
@@ -1384,7 +1387,7 @@ func copySelectedItemToClipboard() {
                     }
                 } catch {
                     DispatchQueue.main.async {
-                        self?.showNotification("❌ Failed to undo move")
+                        self?.showNotification("❌ Could not undo move")
                     }
                 }
 
@@ -1392,14 +1395,14 @@ func copySelectedItemToClipboard() {
                 do {
                     try FileManager.default.removeItem(at: destination)
                     DispatchQueue.main.async {
-                        self?.showNotification("✅ Undo: Deleted copy")
+                        self?.showNotification("✅ Undo: Copy deleted")
                         if let currentFolder = self?.currentFolderURL {
                             self?.loadFolder(url: currentFolder, sidebarManager: nil)
                         }
                     }
                 } catch {
                     DispatchQueue.main.async {
-                        self?.showNotification("❌ Failed to undo copy")
+                        self?.showNotification("❌ Could not undo copy")
                     }
                 }
 
@@ -1416,7 +1419,7 @@ func copySelectedItemToClipboard() {
                     }
                 } catch {
                     DispatchQueue.main.async {
-                        self?.showNotification("❌ Failed to undo rename")
+                        self?.showNotification("❌ Could not undo rename")
                     }
                 }
 
@@ -1431,13 +1434,13 @@ func copySelectedItemToClipboard() {
                     }
                 } catch {
                     DispatchQueue.main.async {
-                        self?.showNotification("❌ Folder not empty, can't undo")
+                        self?.showNotification("❌ Folder not empty, cannot undo")
                     }
                 }
 
             case .delete:
                 DispatchQueue.main.async {
-                    self?.showNotification("⚠️ Deleted to Trash. Restore manually from Trash.")
+                    self?.showNotification("⚠️ Item deleted to Trash. Restore manually from Trash.")
                 }
             }
         }
