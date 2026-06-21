@@ -19,6 +19,7 @@ struct SidebarFolderItem: Identifiable, Hashable {
     var lastVisitDate: Date = Date.now
     var isCurrentSessionVisit: Bool = true
     var bookmarkData: Data? = nil
+    var isSecurityScopedAccessActive: Bool = false
 }
 
 struct PersistedSidebarItem: Codable {
@@ -43,9 +44,18 @@ class SidebarManager: ObservableObject {
     private let maxRecentItems = 13
     private let recencyWeightDays = 30.0
 
+    private var accessedURLs: [URL] = []
+
     init() {
         loadDefaultSources()
         loadState()
+    }
+
+    deinit {
+        // Liberar todos los recursos security-scoped abiertos
+        for url in accessedURLs {
+            url.stopAccessingSecurityScopedResource()
+        }
     }
 
     // MARK: - Scoring & Sorting (Hybrid Frequency + Recency)
@@ -155,7 +165,10 @@ class SidebarManager: ObservableObject {
         // Limitar a 13 items máximo
         while recent.count > maxRecentItems {
             let removed = recent.removeLast()
-            removed.url.stopAccessingSecurityScopedResource()
+            if removed.isSecurityScopedAccessActive {
+                removed.url.stopAccessingSecurityScopedResource()
+                accessedURLs.removeAll { $0 == removed.url }
+            }
         }
         saveState()
     }
@@ -169,7 +182,10 @@ class SidebarManager: ObservableObject {
     }
     
     func unpinFolder(url: URL) {
-        url.stopAccessingSecurityScopedResource()
+        if let item = bookmarks.first(where: { $0.url == url }), item.isSecurityScopedAccessActive {
+            url.stopAccessingSecurityScopedResource()
+            accessedURLs.removeAll { $0 == url }
+        }
         bookmarks.removeAll { $0.url == url }
         saveState()
     }
@@ -257,8 +273,11 @@ class SidebarManager: ObservableObject {
                 continue
             }
             if let validURL = url {
-                _ = validURL.startAccessingSecurityScopedResource()
-                let item = SidebarFolderItem(
+                let isAccessed = validURL.startAccessingSecurityScopedResource()
+                if isAccessed {
+                    accessedURLs.append(validURL)
+                }
+                var item = SidebarFolderItem(
                     url: validURL,
                     name: pItem.name,
                     systemIcon: pItem.systemIcon,
@@ -267,6 +286,7 @@ class SidebarManager: ObservableObject {
                     isCurrentSessionVisit: false,
                     bookmarkData: pItem.bookmarkData
                 )
+                item.isSecurityScopedAccessActive = isAccessed
                 loadedItems.append(item)
             }
         }

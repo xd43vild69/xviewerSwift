@@ -1457,15 +1457,16 @@ func copySelectedItemToClipboard() {
 
                 await MainActor.run {
                     // Fase 1: Pre-generar ~40 visibles con prioridad alta
-                    self.preloadTask = Task.detached(priority: .userInitiated) { [weak loader] in
+                    self.preloadTask = Task.detached(priority: .userInitiated) { [weak loader, isLocalFolder] in
                         guard let loader else { return }
                         for item in visibleItems {
                             guard !Task.isCancelled else { break }
                             await ThumbnailCache.load(item: item, using: loader)
                         }
 
-                        // Apenas Fase 1 complete, lanzar Fase 2 con prioridad baja
-                        if !Task.isCancelled && !restItems.isEmpty {
+                        // Fase 2 (precargar el resto) SOLO en folders locales.
+                        // En remoto saturaría la red; el resto se carga bajo demanda al hacer scroll.
+                        if isLocalFolder && !Task.isCancelled && !restItems.isEmpty {
                             Task.detached(priority: .utility) {
                                 for item in restItems {
                                     guard !Task.isCancelled else { break }

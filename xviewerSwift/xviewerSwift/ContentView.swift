@@ -170,7 +170,39 @@ extension ThumbnailCache {
                 }
                 return img
             } else {
-                let size = CGSize(width: 160, height: 160)
+                // Estrategia 1: intentar thumbnail embebido (range read, ~30KB) antes de QL
+                let embeddedTask = Task.detached(priority: .userInitiated) { () -> NSImage? in
+                    guard !Task.isCancelled else { return nil }
+                    let options: [CFString: Any] = [
+                        // Solo el thumbnail EXIF embebido: sin "...Always" y con "...IfAbsent: false"
+                        // CoreGraphics devuelve nil si no hay thumb embebido → evita descargar el archivo completo
+                        kCGImageSourceCreateThumbnailFromImageIfAbsent: false,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        // Estrategia 4: downscaling adaptativo (80px en remoto vs 160px local) — ahorra 75% bytes
+                        kCGImageSourceThumbnailMaxPixelSize: item.isLocal ? 160 : 80,
+                        kCGImageSourceShouldCache: false  // remoto: no inflar memoria; ya cacheamos a disco
+                    ]
+                    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+                    guard !Task.isCancelled else { return nil }
+                    guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary) else { return nil }
+                    return NSImage(cgImage: cg, size: .zero)
+                }
+                let embedded = await withTaskCancellationHandler { await embeddedTask.value } onCancel: { embeddedTask.cancel() }
+
+                if let img = embedded {
+                    ThumbnailCache.shared.set(img, for: url)
+                    Task.detached(priority: .background) {
+                        ThumbnailDiskCache.shared.set(img, for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
+                    }
+                    return img
+                }
+
+                guard !Task.isCancelled else { return nil }
+
+                // Fallback: sin thumb embebido → QuickLook (con downscaling en remoto)
+                // Estrategia 4: solicitar 80x80 en remoto (80% menos bytes que 160x160)
+                let pixelSize: CGFloat = item.isLocal ? 160 : 80
+                let size = CGSize(width: pixelSize, height: pixelSize)
                 let request = QLThumbnailGenerator.Request(fileAt: url, size: size, scale: 2.0, representationTypes: .thumbnail)
                 guard let representation = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) else { return nil }
                 let img = representation.nsImage
@@ -240,13 +272,24 @@ struct FileItemView: View {
                     .clipped()
                     .cornerRadius(8)
             } else {
-                Color.gray.opacity(0.3)
-                    .frame(width: 80, height: 80)
-                    .cornerRadius(8)
-                    .task(id: TaskID(url: item.url, isScrolling: isScrolling)) {
-                        guard !isScrolling else { return }
-                        await loadThumbnail()
+                Group {
+                    if !item.isLocal {
+                        // Estrategia 3: icono de tipo de archivo al instante (sin red) mientras carga el thumb real
+                        Image(nsImage: NSWorkspace.shared.icon(forFileType: item.url.pathExtension))
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 80, height: 80)
+                            .opacity(0.5)
+                    } else {
+                        Color.gray.opacity(0.3)
+                            .frame(width: 80, height: 80)
                     }
+                }
+                .cornerRadius(8)
+                .task(id: TaskID(url: item.url, isScrolling: isScrolling)) {
+                    guard !isScrolling else { return }
+                    await loadThumbnail()
+                }
             }
         }
     }
