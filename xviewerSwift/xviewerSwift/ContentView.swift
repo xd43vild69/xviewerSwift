@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 import QuickLookThumbnailing
 import CryptoKit
@@ -1292,6 +1293,32 @@ struct ContentView: View {
         activeSession().showNotification("🧹 Free memory")
     }
 
+    private func updateWindowTitle() {
+        let folderName = activeSession().currentFolderURL?.lastPathComponent ?? "xViewer"
+        DispatchQueue.main.async {
+            if let window = NSApplication.shared.windows.first {
+                // Create centered title view
+                let titleView = NSTextField(labelWithString: folderName)
+                titleView.alignment = .center
+                titleView.font = NSFont.systemFont(ofSize: 13, weight: .regular)
+                titleView.textColor = .labelColor
+
+                let titlebarAccessory = NSTitlebarAccessoryViewController()
+                titlebarAccessory.view = titleView
+                titlebarAccessory.layoutAttribute = .centerX
+
+                // Remove all previous accessory controllers
+                let currentCount = window.titlebarAccessoryViewControllers.count
+                for i in (0..<currentCount).reversed() {
+                    window.removeTitlebarAccessoryViewController(at: i)
+                }
+
+                window.addTitlebarAccessoryViewController(titlebarAccessory)
+                window.title = ""
+            }
+        }
+    }
+
     private var shortcutsGroup: some View {
         Group {
             Button(action: {
@@ -1442,7 +1469,7 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     leftPanel
                         .frame(width: mainGeometry.size.width * 0.1)
-                    
+
                     if isSplitViewEnabled {
                         HSplitView {
                             PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
@@ -1592,8 +1619,6 @@ struct ContentView: View {
         }
         .onAppear {
             setupKeyboardMonitor()
-            // Conectar el sidebarManager a ambas sesiones para que toda navegación
-            // (Enter, subir a padre, etc.) registre visitas recientes.
             session.sidebarManager = sidebarManager
             sessionRight.sidebarManager = sidebarManager
             if session.currentFolderURL == nil {
@@ -1604,6 +1629,10 @@ struct ContentView: View {
                 let initialURLRight = sessionRight.restoreBookmark() ?? FileManager.default.homeDirectoryForCurrentUser
                 sidebarSelectionRight = initialURLRight
             }
+            updateWindowTitle()
+        }
+        .onChange(of: activeSession().currentFolderURL) { _, _ in
+            updateWindowTitle()
         }
     }
     

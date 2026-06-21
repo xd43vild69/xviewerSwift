@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Run
 
-This is a macOS SwiftUI app. Open and build via Xcode:
+This is a macOS SwiftUI app (v1.4). Open and build via Xcode:
 
 ```
 open xviewerSwift/xviewerSwift.xcodeproj
@@ -20,7 +20,7 @@ The app is a single-window SwiftUI application (`xviewerSwiftApp.swift`) with a 
 
 ### Core Data Flow
 
-`BrowserSession` (`BrowserSession.swift`) is the central `@MainActor ObservableObject` that owns all state for a single browser pane: current folder URL, folder contents (`[FileItem]`), selection state, full-screen image URL, sort order, rename alerts, and navigation history. Nearly all user actions (navigate, delete, rename, sort, copy/move) are methods on `BrowserSession`.
+`BrowserSession` (`BrowserSession.swift`) is the central `@MainActor ObservableObject` that owns all state for a single browser pane: current folder URL, folder contents (`[FileItem]`), selection state, full-screen image URL, sort order, rename alerts, and navigation history. Supports back/forward navigation with history tracking. Nearly all user actions (navigate, delete, rename, sort, copy/move) are methods on `BrowserSession`.
 
 `ContentView` (`ContentView.swift`) creates two `BrowserSession` instances (`session` and `sessionRight`) for dual-pane support and an `activePane: ActivePane` enum to route keyboard actions to the correct session. It wires `sidebarSelection` URL changes → `session.loadFolder()` and `session.fullScreenImageURL` changes → `ImmersiveWindowController` (borderless fullscreen window).
 
