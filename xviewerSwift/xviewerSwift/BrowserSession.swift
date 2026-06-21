@@ -165,13 +165,13 @@ func copySelectedItemToClipboard() {
     func pasteFromClipboard(move: Bool = false) {
         guard let targetFolder = self.currentFolderURL else { return }
         let pasteboard = NSPasteboard.general
-        
+
         var pastedSomething = false
-        
+
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
             let fileURLs = urls.filter { $0.isFileURL }
             guard !fileURLs.isEmpty else { return }
-            
+
             if move {
                 let destAccessed = targetFolder.startAccessingSecurityScopedResource()
                 defer { if destAccessed { targetFolder.stopAccessingSecurityScopedResource() } }
@@ -185,29 +185,45 @@ func copySelectedItemToClipboard() {
                         continue
                     }
 
-                    let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
-                    let originalName = sourceURL.deletingPathExtension().lastPathComponent
-                    let ext = sourceURL.pathExtension
-                    var finalURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
+                    let ext = sourceURL.pathExtension.lowercased()
+                    let isJpeg = ext == "jpg" || ext == "jpeg"
 
-                    var counter = 1
-                    while fm.fileExists(atPath: finalURL.path) {
-                        let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
-                        finalURL = targetFolder.appendingPathComponent(newName)
-                        counter += 1
-                    }
+                    if isJpeg {
+                        do {
+                            _ = try moveOrCopyImagePair(jpegURL: sourceURL, to: targetFolder, isCopy: false)
+                            successfullyMoved.append(sourceURL)
+                            movedSet.insert(sourceURL)
+                            if let cr2 = findCompanionCR2(for: sourceURL) {
+                                movedSet.insert(cr2)
+                            }
+                            pastedSomething = true
+                        } catch {
+                            print("Error moving JPEG pair \(sourceURL.lastPathComponent): \(error)")
+                        }
+                    } else {
+                        let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
+                        let originalName = sourceURL.deletingPathExtension().lastPathComponent
+                        var finalURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
 
-                    do {
-                        try fm.moveItem(at: sourceURL, to: finalURL)
-                        successfullyMoved.append(sourceURL)
-                        movedSet.insert(sourceURL)
-                        pastedSomething = true
-                    } catch {
-                        print("Error moving file \(sourceURL.lastPathComponent): \(error)")
-                    }
+                        var counter = 1
+                        while fm.fileExists(atPath: finalURL.path) {
+                            let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
+                            finalURL = targetFolder.appendingPathComponent(newName)
+                            counter += 1
+                        }
 
-                    if sourceAccessed {
-                        sourceURL.stopAccessingSecurityScopedResource()
+                        do {
+                            try fm.moveItem(at: sourceURL, to: finalURL)
+                            successfullyMoved.append(sourceURL)
+                            movedSet.insert(sourceURL)
+                            pastedSomething = true
+                        } catch {
+                            print("Error moving file \(sourceURL.lastPathComponent): \(error)")
+                        }
+
+                        if sourceAccessed {
+                            sourceURL.stopAccessingSecurityScopedResource()
+                        }
                     }
                 }
 
@@ -227,19 +243,42 @@ func copySelectedItemToClipboard() {
             } else {
                 var copiedDestinations: [URL] = []
                 for sourceURL in fileURLs {
-                    let destinationURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
-                    do {
-                        if !FileManager.default.fileExists(atPath: destinationURL.path) {
-                            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+                    let ext = sourceURL.pathExtension.lowercased()
+                    let isJpeg = ext == "jpg" || ext == "jpeg"
+
+                    if isJpeg {
+                        do {
+                            let (finalJpegURL, finalCR2URL) = try moveOrCopyImagePair(jpegURL: sourceURL, to: targetFolder, isCopy: true)
                             pastedSomething = true
-                            copiedDestinations.append(destinationURL)
+                            copiedDestinations.append(finalJpegURL)
+                            if let cr2 = finalCR2URL {
+                                copiedDestinations.append(cr2)
+                            }
+                        } catch {
+                            print("Error copying JPEG pair \(sourceURL.lastPathComponent): \(error)")
                         }
-                    } catch {
-                        print("Error copying file: \(error)")
+                    } else {
+                        let destinationURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
+                        let originalName = sourceURL.deletingPathExtension().lastPathComponent
+                        var finalURL = destinationURL
+
+                        var counter = 1
+                        while FileManager.default.fileExists(atPath: finalURL.path) {
+                            let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
+                            finalURL = targetFolder.appendingPathComponent(newName)
+                            counter += 1
+                        }
+
+                        do {
+                            try FileManager.default.copyItem(at: sourceURL, to: finalURL)
+                            pastedSomething = true
+                            copiedDestinations.append(finalURL)
+                        } catch {
+                            print("Error copying file: \(error)")
+                        }
                     }
                 }
 
-                // Register ONE action for ALL copied files
                 if !copiedDestinations.isEmpty {
                     recordOperation(.copy(destinations: copiedDestinations))
                 }
@@ -263,7 +302,7 @@ func copySelectedItemToClipboard() {
                     print("Error saving image: \(error)")
                 }
             }
-            
+
             if pastedSomething {
                 loadFolder(url: targetFolder, sidebarManager: nil)
             } else {
@@ -385,13 +424,36 @@ func copySelectedItemToClipboard() {
 
         if panel.runModal() == .OK, let destinationURL = panel.url {
             let nextURL = computeNextFocus(for: self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: targets)
+            var movedURLs: Set<URL> = []
 
             do {
                 for tURL in targets {
-                    let finalURL = destinationURL.appendingPathComponent(tURL.lastPathComponent)
-                    try FileManager.default.moveItem(at: tURL, to: finalURL)
+                    let ext = tURL.pathExtension.lowercased()
+                    let isJpeg = ext == "jpg" || ext == "jpeg"
+
+                    if isJpeg {
+                        _ = try moveOrCopyImagePair(jpegURL: tURL, to: destinationURL, isCopy: false)
+                        movedURLs.insert(tURL)
+                        if let cr2 = findCompanionCR2(for: tURL) {
+                            movedURLs.insert(cr2)
+                        }
+                    } else {
+                        let originalName = tURL.deletingPathExtension().lastPathComponent
+                        var finalURL = destinationURL.appendingPathComponent(tURL.lastPathComponent)
+
+                        var counter = 1
+                        while FileManager.default.fileExists(atPath: finalURL.path) {
+                            let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
+                            finalURL = destinationURL.appendingPathComponent(newName)
+                            counter += 1
+                        }
+
+                        try FileManager.default.moveItem(at: tURL, to: finalURL)
+                        movedURLs.insert(tURL)
+                    }
                 }
-                self.folderContents.removeAll(where: { targets.contains($0.url) })
+
+                self.folderContents.removeAll(where: { movedURLs.contains($0.url) })
                 self.selectedItemURLs = []
                 if let next = nextURL {
                     self.selectedItemURLs = [next]
@@ -417,6 +479,95 @@ func copySelectedItemToClipboard() {
         }
     }
 
+    private func findCompanionCR2(for jpegURL: URL) -> URL? {
+        let baseName = jpegURL.deletingPathExtension().lastPathComponent
+        let directory = jpegURL.deletingLastPathComponent()
+        let cr2URL = directory.appendingPathComponent("\(baseName).cr2")
+
+        if FileManager.default.fileExists(atPath: cr2URL.path) {
+            return cr2URL
+        }
+        return nil
+    }
+
+    private func nextAvailableName(baseName: String, extension ext: String, in folder: URL) -> String {
+        let finalName = ext.isEmpty ? baseName : "\(baseName).\(ext)"
+        let finalURL = folder.appendingPathComponent(finalName)
+
+        if !FileManager.default.fileExists(atPath: finalURL.path) {
+            return baseName
+        }
+
+        var counter = 1
+        while true {
+            let newName = "\(baseName)_\(counter)"
+            let newFullName = ext.isEmpty ? newName : "\(newName).\(ext)"
+            let newURL = folder.appendingPathComponent(newFullName)
+            if !FileManager.default.fileExists(atPath: newURL.path) {
+                return newName
+            }
+            counter += 1
+        }
+    }
+
+    private func moveOrCopyImagePair(
+        jpegURL: URL,
+        to destinationDir: URL,
+        isCopy: Bool = false
+    ) throws -> (URL, URL?) {
+        let fm = FileManager.default
+
+        let jpegSourceAccessed = jpegURL.startAccessingSecurityScopedResource()
+        defer { if jpegSourceAccessed { jpegURL.stopAccessingSecurityScopedResource() } }
+
+        let baseName = jpegURL.deletingPathExtension().lastPathComponent
+        let jpegExt = jpegURL.pathExtension
+
+        let companion = findCompanionCR2(for: jpegURL)
+        let companionAccessed = companion.map { $0.startAccessingSecurityScopedResource() } ?? false
+        defer { if companionAccessed { companion?.stopAccessingSecurityScopedResource() } }
+
+        let nextName = nextAvailableName(baseName: baseName, extension: jpegExt, in: destinationDir)
+
+        let finalJpegURL = destinationDir.appendingPathComponent(
+            jpegExt.isEmpty ? nextName : "\(nextName).\(jpegExt)"
+        )
+        let finalCR2URL = companion.map { _ in
+            destinationDir.appendingPathComponent("\(nextName).cr2")
+        }
+
+        if fm.fileExists(atPath: finalJpegURL.path) {
+            throw NSError(domain: "BrowserSession", code: -1,
+                         userInfo: [NSLocalizedDescriptionKey: "JPEG file already exists at destination"])
+        }
+
+        if let finalCR2 = finalCR2URL, fm.fileExists(atPath: finalCR2.path) {
+            throw NSError(domain: "BrowserSession", code: -1,
+                         userInfo: [NSLocalizedDescriptionKey: "CR2 file already exists at destination"])
+        }
+
+        do {
+            if isCopy {
+                try fm.copyItem(at: jpegURL, to: finalJpegURL)
+                if let companion = companion, let finalCR2 = finalCR2URL {
+                    try fm.copyItem(at: companion, to: finalCR2)
+                }
+            } else {
+                try fm.moveItem(at: jpegURL, to: finalJpegURL)
+                if let companion = companion, let finalCR2 = finalCR2URL {
+                    try fm.moveItem(at: companion, to: finalCR2)
+                }
+            }
+        } catch {
+            if !isCopy && fm.fileExists(atPath: finalJpegURL.path) {
+                try? fm.removeItem(at: finalJpegURL)
+            }
+            throw error
+        }
+
+        return (finalJpegURL, finalCR2URL)
+    }
+
     func moveFiles(urls: [URL], to destinationDir: URL) {
         let destAccessed = destinationDir.startAccessingSecurityScopedResource()
         defer { if destAccessed { destinationDir.stopAccessingSecurityScopedResource() } }
@@ -425,33 +576,46 @@ func copySelectedItemToClipboard() {
         let fm = FileManager.default
 
         for sourceURL in urls {
-            let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
+            let ext = sourceURL.pathExtension.lowercased()
+            let isJpeg = ext == "jpg" || ext == "jpeg"
 
-            let originalName = sourceURL.deletingPathExtension().lastPathComponent
-            let ext = sourceURL.pathExtension
-            var finalURL = destinationDir.appendingPathComponent(sourceURL.lastPathComponent)
+            if isJpeg {
+                do {
+                    _ = try moveOrCopyImagePair(jpegURL: sourceURL, to: destinationDir, isCopy: false)
+                    successfullyMoved.insert(sourceURL)
+                    if let cr2Source = findCompanionCR2(for: sourceURL) {
+                        successfullyMoved.insert(cr2Source)
+                    }
+                } catch {
+                    print("Error moving JPEG pair \(sourceURL.lastPathComponent): \(error)")
+                }
+            } else {
+                let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
 
-            var counter = 1
-            while fm.fileExists(atPath: finalURL.path) {
-                let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
-                finalURL = destinationDir.appendingPathComponent(newName)
-                counter += 1
-            }
+                let originalName = sourceURL.deletingPathExtension().lastPathComponent
+                var finalURL = destinationDir.appendingPathComponent(sourceURL.lastPathComponent)
 
-            do {
-                try fm.moveItem(at: sourceURL, to: finalURL)
-                successfullyMoved.insert(sourceURL)
-            } catch {
-                print("Error moving file \(sourceURL.lastPathComponent): \(error)")
-            }
+                var counter = 1
+                while fm.fileExists(atPath: finalURL.path) {
+                    let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
+                    finalURL = destinationDir.appendingPathComponent(newName)
+                    counter += 1
+                }
 
-            if sourceAccessed {
-                sourceURL.stopAccessingSecurityScopedResource()
+                do {
+                    try fm.moveItem(at: sourceURL, to: finalURL)
+                    successfullyMoved.insert(sourceURL)
+                } catch {
+                    print("Error moving file \(sourceURL.lastPathComponent): \(error)")
+                }
+
+                if sourceAccessed {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
             }
         }
 
         if !successfullyMoved.isEmpty {
-            // Register UNO acción para TODOS los archivos movidos
             recordOperation(.move(sources: Array(successfullyMoved), destination: destinationDir))
 
             DispatchQueue.main.async {
@@ -1403,13 +1567,29 @@ func copySelectedItemToClipboard() {
             switch action.operation {
             case .move(let sources, let destination):
                 do {
-                    // Determine origin folder (parent directory of sources)
+                    let fm = FileManager.default
                     let originFolder = sources.first?.deletingLastPathComponent()
 
                     // Move ALL files back to their original locations
                     for source in sources {
                         let movedFileURL = destination.appendingPathComponent(source.lastPathComponent)
-                        try FileManager.default.moveItem(at: movedFileURL, to: source)
+                        try fm.moveItem(at: movedFileURL, to: source)
+
+                        // If this is a JPEG, check for associated CR2 and move it back too
+                        let ext = source.pathExtension.lowercased()
+                        if ext == "jpg" || ext == "jpeg" {
+                            let baseName = source.deletingPathExtension().lastPathComponent
+                            let cr2SourceURL = source.deletingLastPathComponent().appendingPathComponent("\(baseName).cr2")
+                            let cr2MovedURL = destination.appendingPathComponent("\(baseName).cr2")
+
+                            if fm.fileExists(atPath: cr2MovedURL.path) {
+                                do {
+                                    try fm.moveItem(at: cr2MovedURL, to: cr2SourceURL)
+                                } catch {
+                                    print("Warning: Could not undo CR2 file move: \(error)")
+                                }
+                            }
+                        }
                     }
                     DispatchQueue.main.async {
                         self?.showNotification("✅ Undo: \(action.actionDescription)")
@@ -1429,9 +1609,25 @@ func copySelectedItemToClipboard() {
 
             case .copy(let destinations):
                 do {
+                    let fm = FileManager.default
                     // Delete ALL copied files
                     for destination in destinations {
-                        try FileManager.default.removeItem(at: destination)
+                        try fm.removeItem(at: destination)
+
+                        // If this is a JPEG, check for associated CR2 and delete it too
+                        let ext = destination.pathExtension.lowercased()
+                        if ext == "jpg" || ext == "jpeg" {
+                            let baseName = destination.deletingPathExtension().lastPathComponent
+                            let cr2URL = destination.deletingLastPathComponent().appendingPathComponent("\(baseName).cr2")
+
+                            if fm.fileExists(atPath: cr2URL.path) {
+                                do {
+                                    try fm.removeItem(at: cr2URL)
+                                } catch {
+                                    print("Warning: Could not undo CR2 file deletion: \(error)")
+                                }
+                            }
+                        }
                     }
                     DispatchQueue.main.async {
                         self?.showNotification("✅ Undo: \(action.actionDescription)")
@@ -1447,9 +1643,28 @@ func copySelectedItemToClipboard() {
 
             case .rename(let source, let oldName):
                 do {
+                    let fm = FileManager.default
                     let parent = source.deletingLastPathComponent()
                     let oldURL = parent.appendingPathComponent(oldName)
-                    try FileManager.default.moveItem(at: source, to: oldURL)
+                    try fm.moveItem(at: source, to: oldURL)
+
+                    // If this is a JPEG, check for associated CR2 and rename it back too
+                    let ext = oldName.components(separatedBy: ".").last?.lowercased() ?? ""
+                    if ext == "jpg" || ext == "jpeg" {
+                        let oldBaseName = (oldName as NSString).deletingPathExtension
+                        let newBaseName = source.deletingPathExtension().lastPathComponent
+                        let cr2CurrentURL = parent.appendingPathComponent("\(newBaseName).cr2")
+                        let cr2OldURL = parent.appendingPathComponent("\(oldBaseName).cr2")
+
+                        if fm.fileExists(atPath: cr2CurrentURL.path) {
+                            do {
+                                try fm.moveItem(at: cr2CurrentURL, to: cr2OldURL)
+                            } catch {
+                                print("Warning: Could not undo CR2 file rename: \(error)")
+                            }
+                        }
+                    }
+
                     DispatchQueue.main.async {
                         self?.showNotification("✅ Undo: Restored '\(oldName)'")
                         if let currentFolder = self?.currentFolderURL {
