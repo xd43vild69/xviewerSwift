@@ -1297,24 +1297,7 @@ struct ContentView: View {
         let folderName = activeSession().currentFolderURL?.lastPathComponent ?? "xViewer"
         DispatchQueue.main.async {
             if let window = NSApplication.shared.windows.first {
-                // Create centered title view
-                let titleView = NSTextField(labelWithString: folderName)
-                titleView.alignment = .center
-                titleView.font = NSFont.systemFont(ofSize: 13, weight: .regular)
-                titleView.textColor = .labelColor
-
-                let titlebarAccessory = NSTitlebarAccessoryViewController()
-                titlebarAccessory.view = titleView
-                titlebarAccessory.layoutAttribute = .centerX
-
-                // Remove all previous accessory controllers
-                let currentCount = window.titlebarAccessoryViewControllers.count
-                for i in (0..<currentCount).reversed() {
-                    window.removeTitlebarAccessoryViewController(at: i)
-                }
-
-                window.addTitlebarAccessoryViewController(titlebarAccessory)
-                window.title = ""
+                window.title = folderName
             }
         }
     }
