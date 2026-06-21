@@ -66,6 +66,32 @@ class ThumbnailLoader {
     }
 }
 
+// MARK: - Undo/Redo Types
+enum FileOperationType {
+    case move(sources: [URL], destination: URL)
+    case copy(destination: URL)
+    case rename(source: URL, oldName: String)
+    case createFolder(folderURL: URL)
+    case delete(source: URL)
+}
+
+struct UndoableAction {
+    let operation: FileOperationType
+    let timestamp: Date
+
+    var actionDescription: String {
+        switch operation {
+        case .move(let sources, _):
+            let count = sources.count
+            return count == 1 ? "Moved '\(sources[0].lastPathComponent)'" : "Moved \(count) items"
+        case .copy: return "Copied file"
+        case .rename(_, let oldName): return "Renamed '\(oldName)'"
+        case .createFolder(let url): return "Created '\(url.lastPathComponent)'"
+        case .delete(let source): return "Deleted '\(source.lastPathComponent)'"
+        }
+    }
+}
+
 @MainActor
 class BrowserSession: ObservableObject {
     @Published var currentColumnCount: Int = 1
@@ -108,6 +134,8 @@ class BrowserSession: ObservableObject {
     @Published var notificationMessage: String? = nil
     @Published var folderHistory: [URL: URL] = [:]
     @Published var compareImageURLs: [URL]? = nil
+    @Published private(set) var undoHistory: [UndoableAction] = []
+    @Published private(set) var canUndo: Bool = false
 
     // Navigation history stack (back/forward)
     @Published var navigationHistory: [URL] = []
@@ -201,6 +229,7 @@ func copySelectedItemToClipboard() {
                         if !FileManager.default.fileExists(atPath: destinationURL.path) {
                             try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
                             pastedSomething = true
+                            recordOperation(.copy(destination: destinationURL))
                         }
                     } catch {
                         print("Error copying file: \(error)")
@@ -308,28 +337,31 @@ func copySelectedItemToClipboard() {
         guard !targets.isEmpty else { return }
 
         let nextURL = computeNextFocus(for: self.fullScreenImageURL ?? self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: targets)
-        
-        do {
-            for url in targets {
+
+        for url in targets {
+            do {
+                // Try trash first (reversible)
+                try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                recordOperation(.delete(source: url))
+            } catch {
+                // Fallback to permanent delete (NOT recorded, not reversible)
                 do {
-                    try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-                } catch {
                     try FileManager.default.removeItem(at: url)
+                } catch {
+                    print("Error deleting file \(url.lastPathComponent): \(error)")
                 }
             }
-            self.folderContents.removeAll(where: { targets.contains($0.url) })
-            self.selectedItemURLs = []
-            if let next = nextURL {
-                self.selectedItemURLs = [next]
-                self.activeItemURL = next
-            } else {
-                self.activeItemURL = nil
-            }
-            if self.fullScreenImageURL != nil { self.fullScreenImageURL = nextURL }
-        } catch {
-            print("Error deleting file: \(error)")
-            NSSound.beep()
         }
+
+        self.folderContents.removeAll(where: { targets.contains($0.url) })
+        self.selectedItemURLs = []
+        if let next = nextURL {
+            self.selectedItemURLs = [next]
+            self.activeItemURL = next
+        } else {
+            self.activeItemURL = nil
+        }
+        if self.fullScreenImageURL != nil { self.fullScreenImageURL = nextURL }
     }
     
     func moveItem(_ url: URL) {
@@ -411,6 +443,9 @@ func copySelectedItemToClipboard() {
         }
 
         if !successfullyMoved.isEmpty {
+            // Register UNO acción para TODOS los archivos movidos
+            recordOperation(.move(sources: Array(successfullyMoved), destination: destinationDir))
+
             DispatchQueue.main.async {
                 let nextFocus = self.computeNextFocus(for: self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: successfullyMoved)
                 self.folderContents.removeAll(where: { successfullyMoved.contains($0.url) })
@@ -568,6 +603,7 @@ func copySelectedItemToClipboard() {
             let newURL = currentDir.appendingPathComponent(folderName)
             do {
                 try FileManager.default.createDirectory(at: newURL, withIntermediateDirectories: true, attributes: nil)
+                recordOperation(.createFolder(folderURL: newURL))
                 // Pre-register the new folder in history so loadFolder() restores focus to it
                 self.folderHistory[currentDir] = newURL
                 loadFolder(url: currentDir, sidebarManager: nil) // Refresh the view
@@ -769,6 +805,13 @@ func copySelectedItemToClipboard() {
 
     @MainActor
     func processRenames(moves: [(URL, URL)], focusURL: URL? = nil) async {
+        // Register undo ONLY for single-item rename
+        if moves.count == 1 {
+            let (sourceURL, _) = moves[0]
+            let oldName = sourceURL.lastPathComponent
+            recordOperation(.rename(source: sourceURL, oldName: oldName))
+        }
+
         let parentFolder = self.currentFolderURL
         let parentAccessed = parentFolder?.startAccessingSecurityScopedResource() ?? false
         let renamingURLs = Set(moves.map { $0.0 })
@@ -1302,6 +1345,102 @@ func copySelectedItemToClipboard() {
             num += 1
         }
         return num
+    }
+
+    // MARK: - Undo/Redo Operations
+
+    private func recordOperation(_ operation: FileOperationType) {
+        undoHistory.append(UndoableAction(operation: operation, timestamp: Date()))
+        canUndo = !undoHistory.isEmpty
+    }
+
+    func undoLastAction() {
+        guard !undoHistory.isEmpty else { return }
+
+        let action = undoHistory.removeLast()
+        canUndo = !undoHistory.isEmpty
+
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            switch action.operation {
+            case .move(let sources, let destination):
+                do {
+                    // Determine origin folder (parent directory of sources)
+                    let originFolder = sources.first?.deletingLastPathComponent()
+
+                    // Move ALL files back to their original locations
+                    for source in sources {
+                        let movedFileURL = destination.appendingPathComponent(source.lastPathComponent)
+                        try FileManager.default.moveItem(at: movedFileURL, to: source)
+                    }
+                    DispatchQueue.main.async {
+                        self?.showNotification("✅ Undo: \(action.actionDescription)")
+                        // Reload BOTH origin and destination folders to reflect the move
+                        if let originFolder = originFolder {
+                            self?.loadFolder(url: originFolder, sidebarManager: nil)
+                        }
+                        if let currentFolder = self?.currentFolderURL, currentFolder != originFolder {
+                            self?.loadFolder(url: currentFolder, sidebarManager: nil)
+                        }
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self?.showNotification("❌ Failed to undo move")
+                    }
+                }
+
+            case .copy(let destination):
+                do {
+                    try FileManager.default.removeItem(at: destination)
+                    DispatchQueue.main.async {
+                        self?.showNotification("✅ Undo: Deleted copy")
+                        if let currentFolder = self?.currentFolderURL {
+                            self?.loadFolder(url: currentFolder, sidebarManager: nil)
+                        }
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self?.showNotification("❌ Failed to undo copy")
+                    }
+                }
+
+            case .rename(let source, let oldName):
+                do {
+                    let parent = source.deletingLastPathComponent()
+                    let oldURL = parent.appendingPathComponent(oldName)
+                    try FileManager.default.moveItem(at: source, to: oldURL)
+                    DispatchQueue.main.async {
+                        self?.showNotification("✅ Undo: Restored '\(oldName)'")
+                        if let currentFolder = self?.currentFolderURL {
+                            self?.loadFolder(url: currentFolder, sidebarManager: nil)
+                        }
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self?.showNotification("❌ Failed to undo rename")
+                    }
+                }
+
+            case .createFolder(let folderURL):
+                do {
+                    try FileManager.default.removeItem(at: folderURL)
+                    DispatchQueue.main.async {
+                        self?.showNotification("✅ Undo: Deleted folder")
+                        if let currentFolder = self?.currentFolderURL {
+                            self?.loadFolder(url: currentFolder, sidebarManager: nil)
+                        }
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self?.showNotification("❌ Folder not empty, can't undo")
+                    }
+                }
+
+            case .delete:
+                DispatchQueue.main.async {
+                    self?.showNotification("⚠️ Deleted to Trash. Restore manually from Trash.")
+                }
+            }
+        }
     }
 
     // MARK: - Range Selection (Shift+Arrow with deselection)

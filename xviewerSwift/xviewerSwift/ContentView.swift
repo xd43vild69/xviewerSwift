@@ -1303,6 +1303,11 @@ class ContextMenuHandler: NSObject {
     @objc func compareCrossPane() {
         DispatchQueue.main.async { self.crossPaneAction?() }
     }
+    @objc func undoLastAction() {
+        DispatchQueue.main.async {
+            self.session?.undoLastAction()
+        }
+    }
 }
 
 
@@ -1573,6 +1578,18 @@ struct ContentView: View {
         menu.addItem(sortItem)
 
         menu.addItem(NSMenuItem.separator())
+
+        // Undo option (only if available)
+        if session.canUndo, let lastAction = session.undoHistory.last {
+            let undoItem = NSMenuItem(
+                title: "Undo: \(lastAction.actionDescription)",
+                action: #selector(ContextMenuHandler.undoLastAction),
+                keyEquivalent: ""
+            )
+            undoItem.target = handler
+            menu.addItem(undoItem)
+            menu.addItem(NSMenuItem.separator())
+        }
 
         // Basic options
         menu.addItem(withTitle: "New Folder", action: #selector(ContextMenuHandler.createNewFolder), keyEquivalent: "").target = handler
@@ -1956,6 +1973,22 @@ struct ContentView: View {
                     && session.fullScreenImageURL == nil
                     && sessionRight.fullScreenImageURL == nil {
                     ImmersiveWindowController.shared.hide()
+                }
+            }
+            .onChange(of: session.undoHistory.count) { oldCount, newCount in
+                // Only reload when undo happens (count DECREASES), not on new actions
+                if newCount < oldCount && isSplitViewEnabled {
+                    if let rightFolder = sessionRight.currentFolderURL {
+                        sessionRight.loadFolder(url: rightFolder, sidebarManager: sidebarManager)
+                    }
+                }
+            }
+            .onChange(of: sessionRight.undoHistory.count) { oldCount, newCount in
+                // Only reload when undo happens (count DECREASES), not on new actions
+                if newCount < oldCount && isSplitViewEnabled {
+                    if let leftFolder = session.currentFolderURL {
+                        session.loadFolder(url: leftFolder, sidebarManager: sidebarManager)
+                    }
                 }
             }
     }
