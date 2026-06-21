@@ -8,6 +8,8 @@
 - **Responsive Grid View:** Browse thumbnails and folders in a fast, dynamic grid layout that adapts to your window size.
 - **Full-Screen Viewer:** Double-click or press Space/Enter to launch a distraction-free, full-screen image viewer.
 - **Quick Filters:** Apply basic, non-destructive filters on the fly. Use `Cmd + B` for Black & White (Grayscale) and `Cmd + I` for Color Inversion.
+- **GIF & Animation Support:** Seamlessly view animated GIFs directly within the Full-Screen Viewer.
+- **Enhanced Inspection:** Advanced zoom capabilities with image rotation support for detailed review.
 
 ### 📁 Advanced File Management
 - **Favorites & RAW Workflow:**
@@ -19,11 +21,14 @@
 - **Intelligent Collision Handling:** File movements and favorites copying handle naming conflicts automatically (appending suffixes like `_1` to images and their paired RAWs) without disrupting your workflow.
 - **Create & Move:** Create new folders and move items using standard system dialogs.
 - **Clipboard Support:** Copy (`Cmd + C`) and Paste (`Cmd + V`) selected items smoothly across directories.
+- **Undo / Redo History:** Safely revert or re-apply file operations (like move, rename, delete) with native user notifications and standard keyboard shortcuts (`Cmd + Z` / `Cmd + Shift + Z`).
+- **Context Menus:** Comprehensive right-click context menus for lightning-fast access to all file operations and selections.
 
 ### 🪟 Dual Pane (Split View)
 - **Side-by-Side Browsing:** Press `Cmd + S` or use the toolbar button to activate a dual-pane layout for simultaneous, independent browsing of two folders.
 - **Quick Transfer:** Move files instantly between the active and inactive pane using `Option + Left/Right Arrow` shortcuts. The destination pane refreshes automatically.
 - **Smart Focus:** Click anywhere or press `Tab` to seamlessly switch focus between the left and right panels.
+- **Cross-Pane Comparison:** Select images and use the compare functionality to visually evaluate them side-by-side across active panes, perfect for culling similar shots.
 
 ### 🧭 Navigation & Organization
 - **Smart Sidebar:**
@@ -31,6 +36,8 @@
   - **Bookmarks:** Pin your favorite or frequently accessed folders for immediate access.
   - **Recents:** Automatically tracks and dynamically sorts recently visited folders based on frequency of use.
 - **Flexible Sorting:** Sort folder contents by Name, Date, or Size.
+- **History Navigation:** Back and forward support to instantly jump between previously visited directories.
+- **Dynamic Window Titles:** The application window title updates automatically to reflect your current folder and context.
 - **Deep Keyboard Integration:**
   - Navigate grids and menus instantly using **Arrow keys**.
   - Jump directly to the first or last image using `Cmd + Shift + Up Arrow` and `Cmd + Shift + Down Arrow`.
@@ -46,6 +53,11 @@
 ### 🎨 External Integration
 - **Open with Krita:** Dedicated integration to send images directly to the Krita digital painting application for advanced editing.
 - **Open with Lightroom:** Right-click an image to send its corresponding RAW file directly to Adobe Lightroom for professional color grading. Automatically handles temporary workspace staging.
+
+## Market Positioning & Target Audience
+xviewerSwift is uniquely positioned at the intersection of a **lightning-fast image viewer** and a **dual-pane file manager**. 
+It is specifically designed for photographers, digital artists, and visual creators who need to cull and organize thousands of images (including RAW + JPEG pairs) rapidly using keyboard shortcuts, without the overhead of heavy asset managers like Adobe Bridge or Lightroom's Library module. 
+It competes with fast viewers like ApolloOne and FastRawViewer, but differentiates itself by offering robust, native dual-pane file management.
 
 ## Requirements
 - macOS 13.0+ (Ventura) or later.
