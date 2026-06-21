@@ -5,6 +5,8 @@ struct PaneBrowserView: View {
     @ObservedObject var sidebarManager: SidebarManager
     @Binding var sidebarSelection: URL?
     @ObservedObject var session: BrowserSession
+    var otherPaneSelectedImageCount: Int = 0
+    var crossPaneCompareAction: (() -> Void)? = nil
     @State private var scrollDebounceTask: Task<Void, Never>?
 
     var body: some View {
@@ -69,17 +71,27 @@ struct PaneBrowserView: View {
                                     session.updateSelectionAnchor(url)
                                 },
                                 isActive: session.activeItemURL == item.url,
-                                canCompare: session.selectedItemURLs.count == 2
-                                    && !item.isDirectory
-                                    && session.selectedItemURLs.contains(item.url)
-                                    && session.selectedItemURLs.allSatisfy { url in
+                                canCompare: {
+                                    let thisPaneImages = session.selectedItemURLs.filter { url in
                                         session.folderContents.first(where: { $0.url == url })?.isDirectory == false
-                                    },
+                                    }
+                                    let samePaneOk = thisPaneImages.count == 2
+                                        && !item.isDirectory
+                                        && session.selectedItemURLs.contains(item.url)
+                                    let crossPaneOk = crossPaneCompareAction != nil
+                                        && !item.isDirectory
+                                        && thisPaneImages.count == 1
+                                        && session.selectedItemURLs.contains(item.url)
+                                        && otherPaneSelectedImageCount == 1
+                                    return samePaneOk || crossPaneOk
+                                }(),
                                 compareAction: {
-                                    let urls = Array(session.selectedItemURLs)
+                                    let singlePaneURLs = Array(session.selectedItemURLs)
                                         .filter { url in session.folderContents.first(where: { $0.url == url })?.isDirectory == false }
-                                    if urls.count == 2 {
-                                        session.compareImageURLs = urls
+                                    if singlePaneURLs.count == 2 {
+                                        session.compareImageURLs = singlePaneURLs
+                                    } else {
+                                        crossPaneCompareAction?()
                                     }
                                 }
                             )

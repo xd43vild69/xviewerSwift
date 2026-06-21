@@ -1231,6 +1231,7 @@ extension EnvironmentValues {
 class ContextMenuHandler: NSObject {
     var session: BrowserSession?
     var sidebarManager: SidebarManager?
+    var crossPaneAction: (() -> Void)?
 
     @objc func sortByName() {
         DispatchQueue.main.async {
@@ -1299,6 +1300,9 @@ class ContextMenuHandler: NSObject {
             }
         }
     }
+    @objc func compareCrossPane() {
+        DispatchQueue.main.async { self.crossPaneAction?() }
+    }
 }
 
 
@@ -1326,6 +1330,19 @@ struct ContentView: View {
     @State private var activePane: ActivePane = .left
     @State private var currentColumnCount: Int = 1
     @State private var activeItemGlobalFrame: CGRect = .zero
+    @State private var crossPaneCompareURLs: [URL]? = nil
+
+    private var crossPaneSelectedImages: [URL]? {
+        guard isSplitViewEnabled else { return nil }
+        let leftImgs = session.selectedItemURLs.filter { url in
+            session.folderContents.first(where: { $0.url == url })?.isDirectory == false
+        }
+        let rightImgs = sessionRight.selectedItemURLs.filter { url in
+            sessionRight.folderContents.first(where: { $0.url == url })?.isDirectory == false
+        }
+        guard leftImgs.count == 1, rightImgs.count == 1 else { return nil }
+        return [leftImgs.first!, rightImgs.first!]
+    }
 
     private var activeSidebarSelectionBinding: Binding<URL?> {
         Binding<URL?>(
@@ -1537,6 +1554,11 @@ struct ContentView: View {
         let handler = ContextMenuHandler()
         handler.session = session
         handler.sidebarManager = sidebarManager
+        handler.crossPaneAction = {
+            if let urls = self.crossPaneSelectedImages {
+                self.crossPaneCompareURLs = urls
+            }
+        }
 
         let menu = NSMenu()
 
@@ -1594,6 +1616,13 @@ struct ContentView: View {
             let compareItem = NSMenuItem(title: "Compare", action: #selector(ContextMenuHandler.compare), keyEquivalent: "")
             compareItem.target = handler
             menu.addItem(compareItem)
+        }
+
+        if crossPaneSelectedImages != nil {
+            menu.addItem(NSMenuItem.separator())
+            let crossItem = NSMenuItem(title: "Compare (Left vs Right)", action: #selector(ContextMenuHandler.compareCrossPane), keyEquivalent: "")
+            crossItem.target = handler
+            menu.addItem(crossItem)
         }
 
         // Convert SwiftUI global frame to screen coordinates for NSMenu positioning
@@ -1812,22 +1841,46 @@ struct ContentView: View {
                 .frame(width: width * 0.1)
             if isSplitViewEnabled {
                 HSplitView {
-                    PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
-                        .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
-                        .simultaneousGesture(TapGesture().onEnded { activePane = .left })
-                        .overlay(alignment: .top) {
-                            if activePane == .left {
-                                Rectangle().fill(Color.blue).frame(height: 2)
+                    PaneBrowserView(
+                        sidebarManager: sidebarManager,
+                        sidebarSelection: $sidebarSelection,
+                        session: session,
+                        otherPaneSelectedImageCount: sessionRight.selectedItemURLs.filter { url in
+                            sessionRight.folderContents.first(where: { $0.url == url })?.isDirectory == false
+                        }.count,
+                        crossPaneCompareAction: {
+                            if let urls = crossPaneSelectedImages {
+                                crossPaneCompareURLs = urls
                             }
                         }
-                    PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelectionRight, session: sessionRight)
-                        .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
-                        .simultaneousGesture(TapGesture().onEnded { activePane = .right })
-                        .overlay(alignment: .top) {
-                            if activePane == .right {
-                                Rectangle().fill(Color.blue).frame(height: 2)
+                    )
+                    .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
+                    .simultaneousGesture(TapGesture().onEnded { activePane = .left })
+                    .overlay(alignment: .top) {
+                        if activePane == .left {
+                            Rectangle().fill(Color.blue).frame(height: 2)
+                        }
+                    }
+                    PaneBrowserView(
+                        sidebarManager: sidebarManager,
+                        sidebarSelection: $sidebarSelectionRight,
+                        session: sessionRight,
+                        otherPaneSelectedImageCount: session.selectedItemURLs.filter { url in
+                            session.folderContents.first(where: { $0.url == url })?.isDirectory == false
+                        }.count,
+                        crossPaneCompareAction: {
+                            if let urls = crossPaneSelectedImages {
+                                crossPaneCompareURLs = urls
                             }
                         }
+                    )
+                    .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
+                    .simultaneousGesture(TapGesture().onEnded { activePane = .right })
+                    .overlay(alignment: .top) {
+                        if activePane == .right {
+                            Rectangle().fill(Color.blue).frame(height: 2)
+                        }
+                    }
                 }
             } else {
                 PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
@@ -1889,6 +1942,19 @@ struct ContentView: View {
                         CompareView(urlA: urls[0], urlB: urls[1], onClose: { sessionRight.compareImageURLs = nil })
                     }
                 } else if newURLs == nil && sessionRight.fullScreenImageURL == nil {
+                    ImmersiveWindowController.shared.hide()
+                }
+            }
+            .onChange(of: crossPaneCompareURLs) { _, newURLs in
+                if let urls = newURLs, urls.count == 2 {
+                    ImmersiveWindowController.shared.show {
+                        CompareView(urlA: urls[0], urlB: urls[1], onClose: { crossPaneCompareURLs = nil })
+                    }
+                } else if newURLs == nil
+                    && session.compareImageURLs == nil
+                    && sessionRight.compareImageURLs == nil
+                    && session.fullScreenImageURL == nil
+                    && sessionRight.fullScreenImageURL == nil {
                     ImmersiveWindowController.shared.hide()
                 }
             }
