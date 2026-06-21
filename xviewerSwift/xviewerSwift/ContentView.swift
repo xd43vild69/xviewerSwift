@@ -722,13 +722,37 @@ struct FullScreenImageView: View {
                     self.startGIFAnimation(frames)
                 }
             } else {
-                // Cambio 2C: Downsampling a tamaño de pantalla (93% reducción de RAM)
-                let screenSize = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1920, height: 1080)
-                let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+                // Cambio 5: Estrategia de carga para remoto vs local
+                let isSMB = url.path.lowercased().contains("/volumes/") &&
+                            (url.path.lowercased().contains("smb") || url.path.lowercased().contains("cifs"))
 
-                if let downsampledImage = self.downsample(imageAt: url, to: screenSize, scale: scale) {
+                var loadedImage: NSImage? = nil
+
+                if isSMB {
+                    // Estrategia SMB: primero thumb EXIF (rápido, ~30KB), luego downsampling
+                    if let embeddedThumb = self.extractEmbeddedThumbnail(imageAt: url) {
+                        loadedImage = embeddedThumb
+                    } else {
+                        // Fallback: downsampling si no hay thumb embebido
+                        let screenSize = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1920, height: 1080)
+                        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+                        loadedImage = self.downsample(imageAt: url, to: screenSize, scale: scale)
+                    }
+                } else {
+                    // Estrategia Local: downsampling directo (mejor calidad que thumb EXIF)
+                    let screenSize = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1920, height: 1080)
+                    let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+                    loadedImage = self.downsample(imageAt: url, to: screenSize, scale: scale)
+                }
+
+                // Fallback final: si todo falla, cargar imagen completa (raro)
+                if loadedImage == nil {
+                    loadedImage = NSImage(contentsOf: url)
+                }
+
+                if let image = loadedImage {
                     DispatchQueue.main.async {
-                        self.nsImage = downsampledImage
+                        self.nsImage = image
                     }
                 }
             }
@@ -813,6 +837,19 @@ struct FullScreenImageView: View {
         backgroundColorIndex = (backgroundColorIndex + 1) % backgroundColors.count
         let colorNames = ["Black", "75% Black", "Gray", "25% Black", "White"]
         showNotification("🎨 \(colorNames[backgroundColorIndex])")
+    }
+
+    // Cambio 5: Extraer thumbnail EXIF embebido para SMB (fallback rápido)
+    private func extractEmbeddedThumbnail(imageAt url: URL) -> NSImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: false,  // Solo thumb embebido, sin decodificar
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 160
+        ]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return nil }
+        return NSImage(cgImage: cgImage, size: NSZeroSize)
     }
 
     // Cambio 2A: Downsampling adaptativo para prevenir OOM (93% reducción de RAM)
