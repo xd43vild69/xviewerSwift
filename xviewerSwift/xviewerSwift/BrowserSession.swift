@@ -66,6 +66,28 @@ class ThumbnailLoader {
     }
 }
 
+// MARK: - File Operation State
+@MainActor
+class FileOperationState: ObservableObject {
+    @Published var isActive = false
+    @Published var currentFile = ""
+    @Published var progress: Double = 0
+    @Published var totalCount = 0
+    @Published var processedCount = 0
+    @Published var errorMessage: String?
+
+    var cancellationToken = UUID()
+
+    func reset() {
+        isActive = false
+        currentFile = ""
+        progress = 0
+        totalCount = 0
+        processedCount = 0
+        errorMessage = nil
+    }
+}
+
 // MARK: - Undo/Redo Types
 enum FileOperationType {
     case move(sources: [URL], destination: URL)
@@ -144,6 +166,8 @@ class BrowserSession: ObservableObject {
     @Published var navigationHistory: [URL] = []
     @Published var navigationIndex: Int = -1
 
+    @Published var fileOperation = FileOperationState()
+
     var imageItems: [FileItem] {
         folderContents.filter { !$0.isDirectory }
     }
@@ -167,147 +191,156 @@ func copySelectedItemToClipboard() {
         guard let targetFolder = self.currentFolderURL else { return }
         let pasteboard = NSPasteboard.general
 
-        var pastedSomething = false
-
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
             let fileURLs = urls.filter { $0.isFileURL }
             guard !fileURLs.isEmpty else { return }
 
-            if move {
+            let operationID = UUID()
+            fileOperation.cancellationToken = operationID
+
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+
+                DispatchQueue.main.async { [weak self] in
+                    self?.fileOperation.isActive = true
+                    self?.fileOperation.totalCount = fileURLs.count
+                    self?.fileOperation.processedCount = 0
+                }
+
                 let destAccessed = targetFolder.startAccessingSecurityScopedResource()
                 defer { if destAccessed { targetFolder.stopAccessingSecurityScopedResource() } }
 
                 let fm = FileManager.default
-                var successfullyMoved: [URL] = []
-                var movedSet: Set<URL> = []
+                var successfullyProcessed: [URL] = []
+                var processedSet: Set<URL> = []
 
-                for sourceURL in fileURLs {
-                    if sourceURL.deletingLastPathComponent().standardizedFileURL == targetFolder.standardizedFileURL {
-                        continue
+                do {
+                    for sourceURL in fileURLs {
+                        if self.fileOperation.cancellationToken != operationID { break }
+
+                        if sourceURL.deletingLastPathComponent().standardizedFileURL == targetFolder.standardizedFileURL {
+                            DispatchQueue.main.async { [weak self] in
+                                self?.fileOperation.processedCount += 1
+                                self?.fileOperation.progress = Double(self?.fileOperation.processedCount ?? 0) / Double(fileURLs.count)
+                            }
+                            continue
+                        }
+
+                        let fileName = sourceURL.lastPathComponent
+                        let ext = sourceURL.pathExtension.lowercased()
+                        let isJpeg = ext == "jpg" || ext == "jpeg"
+
+                        if isJpeg {
+                            do {
+                                if move {
+                                    _ = try self.moveOrCopyImagePair(jpegURL: sourceURL, to: targetFolder, isCopy: false)
+                                    successfullyProcessed.append(sourceURL)
+                                    processedSet.insert(sourceURL)
+                                    if let cr2 = self.findCompanionCR2(for: sourceURL) {
+                                        processedSet.insert(cr2)
+                                    }
+                                } else {
+                                    _ = try self.moveOrCopyImagePair(jpegURL: sourceURL, to: targetFolder, isCopy: true)
+                                    successfullyProcessed.append(sourceURL)
+                                }
+                            } catch {
+                                print("Error \(move ? "moving" : "copying") JPEG pair \(fileName): \(error)")
+                            }
+                        } else {
+                            let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
+                            let originalName = sourceURL.deletingPathExtension().lastPathComponent
+                            var finalURL = targetFolder.appendingPathComponent(fileName)
+
+                            var counter = 1
+                            while fm.fileExists(atPath: finalURL.path) {
+                                let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
+                                finalURL = targetFolder.appendingPathComponent(newName)
+                                counter += 1
+                            }
+
+                            do {
+                                if move {
+                                    try fm.moveItem(at: sourceURL, to: finalURL)
+                                    processedSet.insert(sourceURL)
+                                } else {
+                                    try fm.copyItem(at: sourceURL, to: finalURL)
+                                }
+                                successfullyProcessed.append(sourceURL)
+                            } catch {
+                                print("Error \(move ? "moving" : "copying") file \(fileName): \(error)")
+                            }
+
+                            if sourceAccessed {
+                                sourceURL.stopAccessingSecurityScopedResource()
+                            }
+                        }
+
+                        DispatchQueue.main.async { [weak self] in
+                            self?.fileOperation.processedCount += 1
+                            self?.fileOperation.progress = Double(self?.fileOperation.processedCount ?? 0) / Double(fileURLs.count)
+                            self?.fileOperation.currentFile = fileName
+                        }
                     }
 
-                    let ext = sourceURL.pathExtension.lowercased()
-                    let isJpeg = ext == "jpg" || ext == "jpeg"
-
-                    if isJpeg {
-                        do {
-                            _ = try moveOrCopyImagePair(jpegURL: sourceURL, to: targetFolder, isCopy: false)
-                            successfullyMoved.append(sourceURL)
-                            movedSet.insert(sourceURL)
-                            if let cr2 = findCompanionCR2(for: sourceURL) {
-                                movedSet.insert(cr2)
+                    if !successfullyProcessed.isEmpty {
+                        if !move {
+                            let destinations = successfullyProcessed
+                            DispatchQueue.main.async { [weak self] in
+                                self?.recordOperation(.copy(destinations: destinations))
                             }
-                            pastedSomething = true
-                        } catch {
-                            print("Error moving JPEG pair \(sourceURL.lastPathComponent): \(error)")
+                        }
+
+                        DispatchQueue.main.async { [weak self] in
+                            if move {
+                                let nextFocus = self?.computeNextFocus(for: self?.activeItemURL ?? self?.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: processedSet)
+                                self?.loadFolder(url: targetFolder, sidebarManager: nil)
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    if let next = nextFocus {
+                                        self?.activeItemURL = next
+                                        self?.selectedItemURLs = [next]
+                                    }
+                                }
+                                self?.showNotification("Moved \(successfullyProcessed.count) items")
+                            } else {
+                                self?.loadFolder(url: targetFolder, sidebarManager: nil)
+                            }
+                            self?.fileOperation.reset()
                         }
                     } else {
-                        let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
-                        let originalName = sourceURL.deletingPathExtension().lastPathComponent
-                        var finalURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
-
-                        var counter = 1
-                        while fm.fileExists(atPath: finalURL.path) {
-                            let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
-                            finalURL = targetFolder.appendingPathComponent(newName)
-                            counter += 1
-                        }
-
-                        do {
-                            try fm.moveItem(at: sourceURL, to: finalURL)
-                            successfullyMoved.append(sourceURL)
-                            movedSet.insert(sourceURL)
-                            pastedSomething = true
-                        } catch {
-                            print("Error moving file \(sourceURL.lastPathComponent): \(error)")
-                        }
-
-                        if sourceAccessed {
-                            sourceURL.stopAccessingSecurityScopedResource()
+                        DispatchQueue.main.async { [weak self] in
+                            NSSound.beep()
+                            self?.fileOperation.reset()
                         }
                     }
-                }
-
-                if pastedSomething {
-                    let nextFocus = self.computeNextFocus(for: self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: movedSet)
-                    self.loadFolder(url: targetFolder, sidebarManager: nil)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        if let next = nextFocus {
-                            self.activeItemURL = next
-                            self.selectedItemURLs = [next]
-                        }
-                    }
-                    showNotification("Moved \(successfullyMoved.count) items")
-                } else {
-                    NSSound.beep()
-                }
-            } else {
-                var copiedDestinations: [URL] = []
-                for sourceURL in fileURLs {
-                    let ext = sourceURL.pathExtension.lowercased()
-                    let isJpeg = ext == "jpg" || ext == "jpeg"
-
-                    if isJpeg {
-                        do {
-                            let (finalJpegURL, finalCR2URL) = try moveOrCopyImagePair(jpegURL: sourceURL, to: targetFolder, isCopy: true)
-                            pastedSomething = true
-                            copiedDestinations.append(finalJpegURL)
-                            if let cr2 = finalCR2URL {
-                                copiedDestinations.append(cr2)
-                            }
-                        } catch {
-                            print("Error copying JPEG pair \(sourceURL.lastPathComponent): \(error)")
-                        }
-                    } else {
-                        let destinationURL = targetFolder.appendingPathComponent(sourceURL.lastPathComponent)
-                        let originalName = sourceURL.deletingPathExtension().lastPathComponent
-                        var finalURL = destinationURL
-
-                        var counter = 1
-                        while FileManager.default.fileExists(atPath: finalURL.path) {
-                            let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
-                            finalURL = targetFolder.appendingPathComponent(newName)
-                            counter += 1
-                        }
-
-                        do {
-                            try FileManager.default.copyItem(at: sourceURL, to: finalURL)
-                            pastedSomething = true
-                            copiedDestinations.append(finalURL)
-                        } catch {
-                            print("Error copying file: \(error)")
-                        }
-                    }
-                }
-
-                if !copiedDestinations.isEmpty {
-                    recordOperation(.copy(destinations: copiedDestinations))
-                }
-
-                if pastedSomething {
-                    loadFolder(url: targetFolder, sidebarManager: nil)
-                } else {
-                    NSSound.beep()
                 }
             }
         } else if !move, let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage], let firstImage = images.first {
-            if let tiff = firstImage.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let pngData = bitmap.representation(using: .png, properties: [:]) {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
-                let fileName = "Pasted Image \(formatter.string(from: Date())).png"
-                let destinationURL = targetFolder.appendingPathComponent(fileName)
-                do {
-                    try pngData.write(to: destinationURL)
-                    pastedSomething = true
-                } catch {
-                    print("Error saving image: \(error)")
-                }
-            }
+            guard let targetFolder = self.currentFolderURL else { return }
 
-            if pastedSomething {
-                loadFolder(url: targetFolder, sidebarManager: nil)
-            } else {
-                NSSound.beep()
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+
+                if let tiff = firstImage.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let pngData = bitmap.representation(using: .png, properties: [:]) {
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+                    let fileName = "Pasted Image \(formatter.string(from: Date())).png"
+                    let destinationURL = targetFolder.appendingPathComponent(fileName)
+                    do {
+                        try pngData.write(to: destinationURL)
+                        DispatchQueue.main.async { [weak self] in
+                            self?.loadFolder(url: targetFolder, sidebarManager: nil)
+                        }
+                    } catch {
+                        print("Error saving image: \(error)")
+                        DispatchQueue.main.async {
+                            NSSound.beep()
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        NSSound.beep()
+                    }
+                }
             }
         }
     }
@@ -386,30 +419,65 @@ func copySelectedItemToClipboard() {
 
         let nextURL = computeNextFocus(for: self.fullScreenImageURL ?? self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: targets)
 
-        for url in targets {
+        let operationID = UUID()
+        fileOperation.cancellationToken = operationID
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+
+            DispatchQueue.main.async { [weak self] in
+                self?.fileOperation.isActive = true
+                self?.fileOperation.totalCount = targets.count
+                self?.fileOperation.processedCount = 0
+            }
+
+            var successCount = 0
+            var deletedURLs: [URL] = []
+
             do {
-                // Try trash first (reversible)
-                try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-                recordOperation(.delete(source: url))
-            } catch {
-                // Fallback to permanent delete (NOT recorded, not reversible)
-                do {
-                    try FileManager.default.removeItem(at: url)
-                } catch {
-                    print("Error deleting file \(url.lastPathComponent): \(error)")
+                for url in targets {
+                    if self.fileOperation.cancellationToken != operationID { break }
+
+                    let fileName = url.lastPathComponent
+
+                    do {
+                        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                        DispatchQueue.main.async { [weak self] in
+                            self?.recordOperation(.delete(source: url))
+                        }
+                        deletedURLs.append(url)
+                        successCount += 1
+                    } catch {
+                        do {
+                            try FileManager.default.removeItem(at: url)
+                            deletedURLs.append(url)
+                            successCount += 1
+                        } catch {
+                            print("Error deleting file \(fileName): \(error)")
+                        }
+                    }
+
+                    DispatchQueue.main.async { [weak self] in
+                        self?.fileOperation.processedCount = successCount
+                        self?.fileOperation.progress = Double(successCount) / Double(targets.count)
+                        self?.fileOperation.currentFile = fileName
+                    }
+                }
+
+                DispatchQueue.main.async { [weak self] in
+                    self?.folderContents.removeAll(where: { deletedURLs.contains($0.url) })
+                    self?.selectedItemURLs = []
+                    if let next = nextURL {
+                        self?.selectedItemURLs = [next]
+                        self?.activeItemURL = next
+                    } else {
+                        self?.activeItemURL = nil
+                    }
+                    if self?.fullScreenImageURL != nil { self?.fullScreenImageURL = nextURL }
+                    self?.fileOperation.reset()
                 }
             }
         }
-
-        self.folderContents.removeAll(where: { targets.contains($0.url) })
-        self.selectedItemURLs = []
-        if let next = nextURL {
-            self.selectedItemURLs = [next]
-            self.activeItemURL = next
-        } else {
-            self.activeItemURL = nil
-        }
-        if self.fullScreenImageURL != nil { self.fullScreenImageURL = nextURL }
     }
     
     func moveItem(_ url: URL) {
@@ -425,47 +493,78 @@ func copySelectedItemToClipboard() {
 
         if panel.runModal() == .OK, let destinationURL = panel.url {
             let nextURL = computeNextFocus(for: self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: targets)
-            var movedURLs: Set<URL> = []
 
-            do {
-                for tURL in targets {
-                    let ext = tURL.pathExtension.lowercased()
-                    let isJpeg = ext == "jpg" || ext == "jpeg"
+            let operationID = UUID()
+            fileOperation.cancellationToken = operationID
 
-                    if isJpeg {
-                        _ = try moveOrCopyImagePair(jpegURL: tURL, to: destinationURL, isCopy: false)
-                        movedURLs.insert(tURL)
-                        if let cr2 = findCompanionCR2(for: tURL) {
-                            movedURLs.insert(cr2)
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+
+                DispatchQueue.main.async { [weak self] in
+                    self?.fileOperation.isActive = true
+                    self?.fileOperation.totalCount = targets.count
+                    self?.fileOperation.processedCount = 0
+                }
+
+                var movedURLs: Set<URL> = []
+
+                do {
+                    var processedCount = 0
+                    for tURL in targets {
+                        if self.fileOperation.cancellationToken != operationID { break }
+
+                        let fileName = tURL.lastPathComponent
+                        let ext = tURL.pathExtension.lowercased()
+                        let isJpeg = ext == "jpg" || ext == "jpeg"
+
+                        if isJpeg {
+                            _ = try self.moveOrCopyImagePair(jpegURL: tURL, to: destinationURL, isCopy: false)
+                            movedURLs.insert(tURL)
+                            if let cr2 = self.findCompanionCR2(for: tURL) {
+                                movedURLs.insert(cr2)
+                            }
+                        } else {
+                            let originalName = tURL.deletingPathExtension().lastPathComponent
+                            var finalURL = destinationURL.appendingPathComponent(fileName)
+
+                            var counter = 1
+                            while FileManager.default.fileExists(atPath: finalURL.path) {
+                                let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
+                                finalURL = destinationURL.appendingPathComponent(newName)
+                                counter += 1
+                            }
+
+                            try FileManager.default.moveItem(at: tURL, to: finalURL)
+                            movedURLs.insert(tURL)
                         }
-                    } else {
-                        let originalName = tURL.deletingPathExtension().lastPathComponent
-                        var finalURL = destinationURL.appendingPathComponent(tURL.lastPathComponent)
 
-                        var counter = 1
-                        while FileManager.default.fileExists(atPath: finalURL.path) {
-                            let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
-                            finalURL = destinationURL.appendingPathComponent(newName)
-                            counter += 1
+                        processedCount += 1
+                        DispatchQueue.main.async { [weak self] in
+                            self?.fileOperation.processedCount = processedCount
+                            self?.fileOperation.progress = Double(processedCount) / Double(targets.count)
+                            self?.fileOperation.currentFile = fileName
                         }
+                    }
 
-                        try FileManager.default.moveItem(at: tURL, to: finalURL)
-                        movedURLs.insert(tURL)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.folderContents.removeAll(where: { movedURLs.contains($0.url) })
+                        self?.selectedItemURLs = []
+                        if let next = nextURL {
+                            self?.selectedItemURLs = [next]
+                            self?.activeItemURL = next
+                        } else {
+                            self?.activeItemURL = nil
+                        }
+                        if self?.fullScreenImageURL != nil { self?.fullScreenImageURL = nextURL }
+                        self?.fileOperation.reset()
+                    }
+                } catch {
+                    DispatchQueue.main.async { [weak self] in
+                        print("Error moving file: \(error)")
+                        NSSound.beep()
+                        self?.fileOperation.reset()
                     }
                 }
-
-                self.folderContents.removeAll(where: { movedURLs.contains($0.url) })
-                self.selectedItemURLs = []
-                if let next = nextURL {
-                    self.selectedItemURLs = [next]
-                    self.activeItemURL = next
-                } else {
-                    self.activeItemURL = nil
-                }
-                if self.fullScreenImageURL != nil { self.fullScreenImageURL = nextURL }
-            } catch {
-                print("Error moving file: \(error)")
-                NSSound.beep()
             }
         }
     }
@@ -570,64 +669,97 @@ func copySelectedItemToClipboard() {
     }
 
     func moveFiles(urls: [URL], to destinationDir: URL) {
-        let destAccessed = destinationDir.startAccessingSecurityScopedResource()
-        defer { if destAccessed { destinationDir.stopAccessingSecurityScopedResource() } }
+        let operationID = UUID()
+        fileOperation.cancellationToken = operationID
 
-        var successfullyMoved: Set<URL> = []
-        let fm = FileManager.default
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
 
-        for sourceURL in urls {
-            let ext = sourceURL.pathExtension.lowercased()
-            let isJpeg = ext == "jpg" || ext == "jpeg"
-
-            if isJpeg {
-                do {
-                    _ = try moveOrCopyImagePair(jpegURL: sourceURL, to: destinationDir, isCopy: false)
-                    successfullyMoved.insert(sourceURL)
-                    if let cr2Source = findCompanionCR2(for: sourceURL) {
-                        successfullyMoved.insert(cr2Source)
-                    }
-                } catch {
-                    print("Error moving JPEG pair \(sourceURL.lastPathComponent): \(error)")
-                }
-            } else {
-                let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
-
-                let originalName = sourceURL.deletingPathExtension().lastPathComponent
-                var finalURL = destinationDir.appendingPathComponent(sourceURL.lastPathComponent)
-
-                var counter = 1
-                while fm.fileExists(atPath: finalURL.path) {
-                    let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
-                    finalURL = destinationDir.appendingPathComponent(newName)
-                    counter += 1
-                }
-
-                do {
-                    try fm.moveItem(at: sourceURL, to: finalURL)
-                    successfullyMoved.insert(sourceURL)
-                } catch {
-                    print("Error moving file \(sourceURL.lastPathComponent): \(error)")
-                }
-
-                if sourceAccessed {
-                    sourceURL.stopAccessingSecurityScopedResource()
-                }
+            DispatchQueue.main.async { [weak self] in
+                self?.fileOperation.isActive = true
+                self?.fileOperation.totalCount = urls.count
+                self?.fileOperation.processedCount = 0
             }
-        }
 
-        if !successfullyMoved.isEmpty {
-            recordOperation(.move(sources: Array(successfullyMoved), destination: destinationDir))
+            let destAccessed = destinationDir.startAccessingSecurityScopedResource()
+            defer { if destAccessed { destinationDir.stopAccessingSecurityScopedResource() } }
 
-            DispatchQueue.main.async {
-                let nextFocus = self.computeNextFocus(for: self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: successfullyMoved)
-                self.folderContents.removeAll(where: { successfullyMoved.contains($0.url) })
-                self.selectedItemURLs.subtract(successfullyMoved)
-                if let next = nextFocus {
-                    self.activeItemURL = next
-                    self.selectedItemURLs = [next]
+            var successfullyMoved: Set<URL> = []
+            let fm = FileManager.default
+
+            do {
+                var processedCount = 0
+                for sourceURL in urls {
+                    if self.fileOperation.cancellationToken != operationID { break }
+
+                    let fileName = sourceURL.lastPathComponent
+                    let ext = sourceURL.pathExtension.lowercased()
+                    let isJpeg = ext == "jpg" || ext == "jpeg"
+
+                    if isJpeg {
+                        do {
+                            _ = try self.moveOrCopyImagePair(jpegURL: sourceURL, to: destinationDir, isCopy: false)
+                            successfullyMoved.insert(sourceURL)
+                            if let cr2Source = self.findCompanionCR2(for: sourceURL) {
+                                successfullyMoved.insert(cr2Source)
+                            }
+                        } catch {
+                            print("Error moving JPEG pair \(fileName): \(error)")
+                        }
+                    } else {
+                        let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
+
+                        let originalName = sourceURL.deletingPathExtension().lastPathComponent
+                        var finalURL = destinationDir.appendingPathComponent(fileName)
+
+                        var counter = 1
+                        while fm.fileExists(atPath: finalURL.path) {
+                            let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
+                            finalURL = destinationDir.appendingPathComponent(newName)
+                            counter += 1
+                        }
+
+                        do {
+                            try fm.moveItem(at: sourceURL, to: finalURL)
+                            successfullyMoved.insert(sourceURL)
+                        } catch {
+                            print("Error moving file \(fileName): \(error)")
+                        }
+
+                        if sourceAccessed {
+                            sourceURL.stopAccessingSecurityScopedResource()
+                        }
+                    }
+
+                    processedCount += 1
+                    DispatchQueue.main.async { [weak self] in
+                        self?.fileOperation.processedCount = processedCount
+                        self?.fileOperation.progress = Double(processedCount) / Double(urls.count)
+                        self?.fileOperation.currentFile = fileName
+                    }
+                }
+
+                if !successfullyMoved.isEmpty {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.recordOperation(.move(sources: Array(successfullyMoved), destination: destinationDir))
+                    }
+
+                    DispatchQueue.main.async { [weak self] in
+                        let nextFocus = self?.computeNextFocus(for: self?.activeItemURL ?? self?.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: successfullyMoved)
+                        self?.folderContents.removeAll(where: { successfullyMoved.contains($0.url) })
+                        self?.selectedItemURLs.subtract(successfullyMoved)
+                        if let next = nextFocus {
+                            self?.activeItemURL = next
+                            self?.selectedItemURLs = [next]
+                        } else {
+                            self?.activeItemURL = nil
+                        }
+                        self?.fileOperation.reset()
+                    }
                 } else {
-                    self.activeItemURL = nil
+                    DispatchQueue.main.async { [weak self] in
+                        self?.fileOperation.reset()
+                    }
                 }
             }
         }
@@ -986,54 +1118,100 @@ func copySelectedItemToClipboard() {
         }
 
         let parentFolder = self.currentFolderURL
-        let parentAccessed = parentFolder?.startAccessingSecurityScopedResource() ?? false
         let renamingURLs = Set(moves.map { $0.0 })
 
-        // Phase 1: Rename to temporary names to avoid intra-batch collisions
-        var tempMoves: [(URL, URL)] = []
-        for (source, destination) in moves {
-            if source == destination { continue }
+        let operationID = UUID()
+        fileOperation.cancellationToken = operationID
+        fileOperation.isActive = true
+        fileOperation.totalCount = moves.count * 2
 
-            let itemAccessed = source.startAccessingSecurityScopedResource()
-            let tempName = UUID().uuidString + "_" + source.lastPathComponent
-            let tempURL = source.deletingLastPathComponent().appendingPathComponent(tempName)
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { continuation.resume(); return }
 
-            do {
-                try FileManager.default.moveItem(at: source, to: tempURL)
-                tempMoves.append((tempURL, destination))
-            } catch {
-                print("Error creating temp file for \(source.lastPathComponent): \(error)")
-            }
+                let parentAccessed = parentFolder?.startAccessingSecurityScopedResource() ?? false
+                defer { if parentAccessed { parentFolder?.stopAccessingSecurityScopedResource() } }
 
-            if itemAccessed {
-                source.stopAccessingSecurityScopedResource()
-            }
-        }
+                do {
+                    var processedCount = 0
+                    var tempMoves: [(URL, URL)] = []
 
-        // Phase 2: Rename to final names
-        for (tempURL, destination) in tempMoves {
-            do {
-                if FileManager.default.fileExists(atPath: destination.path) {
-                    print("File already exists at destination: \(destination.path)")
-                    continue
-                }
-                try FileManager.default.moveItem(at: tempURL, to: destination)
-            } catch {
-                print("Error renaming temp file to \(destination.lastPathComponent): \(error)")
-            }
-        }
+                    // Phase 1: Rename to temporary names to avoid intra-batch collisions
+                    for (source, destination) in moves {
+                        if self.fileOperation.cancellationToken != operationID { break }
 
-        if parentAccessed {
-            parentFolder?.stopAccessingSecurityScopedResource()
-        }
+                        if source == destination {
+                            DispatchQueue.main.async { [weak self] in
+                                self?.fileOperation.processedCount += 1
+                                self?.fileOperation.progress = Double(self?.fileOperation.processedCount ?? 0) / Double(moves.count * 2)
+                            }
+                            continue
+                        }
 
-        if let url = self.currentFolderURL {
-            let nextFocus = focusURL.flatMap { computeNextFocus(for: $0, excluding: renamingURLs) }
-            self.loadFolder(url: url, sidebarManager: nil)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                if let next = nextFocus {
-                    self.activeItemURL = next
-                    self.selectedItemURLs = [next]
+                        let itemAccessed = source.startAccessingSecurityScopedResource()
+                        let tempName = UUID().uuidString + "_" + source.lastPathComponent
+                        let tempURL = source.deletingLastPathComponent().appendingPathComponent(tempName)
+
+                        do {
+                            try FileManager.default.moveItem(at: source, to: tempURL)
+                            tempMoves.append((tempURL, destination))
+                        } catch {
+                            print("Error creating temp file for \(source.lastPathComponent): \(error)")
+                        }
+
+                        if itemAccessed {
+                            source.stopAccessingSecurityScopedResource()
+                        }
+
+                        processedCount += 1
+                        DispatchQueue.main.async { [weak self] in
+                            self?.fileOperation.processedCount = processedCount
+                            self?.fileOperation.progress = Double(processedCount) / Double(moves.count * 2)
+                            self?.fileOperation.currentFile = source.lastPathComponent
+                        }
+                    }
+
+                    // Phase 2: Rename to final names
+                    for (tempURL, destination) in tempMoves {
+                        if self.fileOperation.cancellationToken != operationID { break }
+
+                        do {
+                            if FileManager.default.fileExists(atPath: destination.path) {
+                                print("File already exists at destination: \(destination.path)")
+                                processedCount += 1
+                                DispatchQueue.main.async { [weak self] in
+                                    self?.fileOperation.processedCount = processedCount
+                                    self?.fileOperation.progress = Double(processedCount) / Double(moves.count * 2)
+                                }
+                                continue
+                            }
+                            try FileManager.default.moveItem(at: tempURL, to: destination)
+                        } catch {
+                            print("Error renaming temp file to \(destination.lastPathComponent): \(error)")
+                        }
+
+                        processedCount += 1
+                        DispatchQueue.main.async { [weak self] in
+                            self?.fileOperation.processedCount = processedCount
+                            self?.fileOperation.progress = Double(processedCount) / Double(moves.count * 2)
+                            self?.fileOperation.currentFile = destination.lastPathComponent
+                        }
+                    }
+
+                    DispatchQueue.main.async { [weak self] in
+                        if let url = self?.currentFolderURL {
+                            let nextFocus = focusURL.flatMap { self?.computeNextFocus(for: $0, excluding: renamingURLs) }
+                            self?.loadFolder(url: url, sidebarManager: nil)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                if let next = nextFocus {
+                                    self?.activeItemURL = next
+                                    self?.selectedItemURLs = [next]
+                                }
+                            }
+                        }
+                        self?.fileOperation.reset()
+                        continuation.resume()
+                    }
                 }
             }
         }
@@ -1555,19 +1733,98 @@ func copySelectedItemToClipboard() {
         let blocks = stride(from: 0, to: images.count, by: blockSize)
             .map { Array(images[$0..<min($0 + blockSize, images.count)]) }
 
-        for block in blocks {
-            let partNum = nextAvailablePartitionNumber(in: folderURL, baseName: folderName)
-            let partFolderName = "\(folderName)_\(partNum)"
-            let partFolderURL = folderURL.appendingPathComponent(partFolderName)
+        let operationID = UUID()
+        fileOperation.cancellationToken = operationID
 
-            try? FileManager.default.createDirectory(at: partFolderURL,
-                                                     withIntermediateDirectories: false)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
 
-            let imageURLs = block.map { $0.url }
-            moveFiles(urls: imageURLs, to: partFolderURL)
+            DispatchQueue.main.async { [weak self] in
+                self?.fileOperation.isActive = true
+                self?.fileOperation.totalCount = blocks.count
+                self?.fileOperation.processedCount = 0
+            }
+
+            var processedCount = 0
+            for block in blocks {
+                if self.fileOperation.cancellationToken != operationID { break }
+
+                let partNum = self.nextAvailablePartitionNumber(in: folderURL, baseName: folderName)
+                let partFolderName = "\(folderName)_\(partNum)"
+                let partFolderURL = folderURL.appendingPathComponent(partFolderName)
+
+                try? FileManager.default.createDirectory(at: partFolderURL,
+                                                         withIntermediateDirectories: false)
+
+                let imageURLs = block.map { $0.url }
+
+                // Realizar movimiento de forma sincrónica en el background thread
+                do {
+                    let fm = FileManager.default
+                    var successfullyMoved: Set<URL> = []
+
+                    for sourceURL in imageURLs {
+                        let ext = sourceURL.pathExtension.lowercased()
+                        let isJpeg = ext == "jpg" || ext == "jpeg"
+
+                        if isJpeg {
+                            do {
+                                _ = try self.moveOrCopyImagePair(jpegURL: sourceURL, to: partFolderURL, isCopy: false)
+                                successfullyMoved.insert(sourceURL)
+                                if let cr2Source = self.findCompanionCR2(for: sourceURL) {
+                                    successfullyMoved.insert(cr2Source)
+                                }
+                            } catch {
+                                print("Error moving JPEG pair \(sourceURL.lastPathComponent): \(error)")
+                            }
+                        } else {
+                            let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
+
+                            let originalName = sourceURL.deletingPathExtension().lastPathComponent
+                            var finalURL = partFolderURL.appendingPathComponent(sourceURL.lastPathComponent)
+
+                            var counter = 1
+                            while fm.fileExists(atPath: finalURL.path) {
+                                let newName = ext.isEmpty ? "\(originalName)_\(counter)" : "\(originalName)_\(counter).\(ext)"
+                                finalURL = partFolderURL.appendingPathComponent(newName)
+                                counter += 1
+                            }
+
+                            do {
+                                try fm.moveItem(at: sourceURL, to: finalURL)
+                                successfullyMoved.insert(sourceURL)
+                            } catch {
+                                print("Error moving file \(sourceURL.lastPathComponent): \(error)")
+                            }
+
+                            if sourceAccessed {
+                                sourceURL.stopAccessingSecurityScopedResource()
+                            }
+                        }
+                    }
+
+                    if !successfullyMoved.isEmpty {
+                        DispatchQueue.main.async { [weak self] in
+                            self?.recordOperation(.move(sources: Array(successfullyMoved), destination: partFolderURL))
+                        }
+                    }
+                } catch {
+                    print("Error in partition block: \(error)")
+                }
+
+                processedCount += 1
+                DispatchQueue.main.async { [weak self] in
+                    self?.fileOperation.processedCount = processedCount
+                    self?.fileOperation.progress = Double(processedCount) / Double(blocks.count)
+                    self?.fileOperation.currentFile = "\(partFolderName)"
+                }
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                self?.loadFolder(url: folderURL, sidebarManager: nil)
+                self?.fileOperation.reset()
+            }
         }
-
-        loadFolder(url: folderURL, sidebarManager: sidebarManager)
     }
 
     private func nextAvailablePartitionNumber(in folderURL: URL, baseName: String) -> Int {

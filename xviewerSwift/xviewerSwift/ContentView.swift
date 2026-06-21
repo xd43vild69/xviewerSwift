@@ -1911,58 +1911,82 @@ struct ContentView: View {
     private var statusBar: some View {
         VStack(spacing: 0) {
             Divider()
-            HStack {
-                if let url = activeSession().activeItemURL ?? activeSession().currentFolderURL {
-                    Text(url.path)
-                        .font(.system(size: 11))
-                        .foregroundColor(.white)
+
+            if activeSession().fileOperation.isActive {
+                HStack(spacing: 8) {
+                    ProgressView(value: activeSession().fileOperation.progress)
+                        .frame(maxWidth: 150)
+
+                    Text("\(activeSession().fileOperation.processedCount)/\(activeSession().fileOperation.totalCount)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .frame(minWidth: 50)
+
+                    Text(activeSession().fileOperation.currentFile)
+                        .font(.caption)
                         .lineLimit(1)
-                        .truncationMode(.head)
-                        .onHover { isHovering in
-                            if isHovering {
-                                NSCursor.pointingHand.push()
-                            } else {
-                                NSCursor.pop()
-                            }
-                        }
-                        .onTapGesture {
-                            let pasteboard = NSPasteboard.general
-                            pasteboard.clearContents()
-                            pasteboard.setString(url.path, forType: .string)
-                            
-                            withAnimation {
-                                activeSession().showCopiedFeedback = true
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                                withAnimation {
-                                    activeSession().showCopiedFeedback = false
+                        .truncationMode(.middle)
+                        .foregroundColor(.secondary)
+
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 24)
+                .background(Color(NSColor.windowBackgroundColor))
+            } else {
+                HStack {
+                    if let url = activeSession().activeItemURL ?? activeSession().currentFolderURL {
+                        Text(url.path)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                            .onHover { isHovering in
+                                if isHovering {
+                                    NSCursor.pointingHand.push()
+                                } else {
+                                    NSCursor.pop()
                                 }
                             }
-                        }
-                        .opacity(activeSession().showCopiedFeedback ? 0.3 : 1.0)
+                            .onTapGesture {
+                                let pasteboard = NSPasteboard.general
+                                pasteboard.clearContents()
+                                pasteboard.setString(url.path, forType: .string)
+
+                                withAnimation {
+                                    activeSession().showCopiedFeedback = true
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                                    withAnimation {
+                                        activeSession().showCopiedFeedback = false
+                                    }
+                                }
+                            }
+                            .opacity(activeSession().showCopiedFeedback ? 0.3 : 1.0)
+                    }
+
+                    if activeSession().showCopiedFeedback {
+                        Text("(Copied to clipboard)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.green)
+                            .transition(.opacity)
+                    }
+
+                    Spacer()
+
+                    Text("\(activeSession().imageItems.count) images" + (activeSession().otherFileCount > 0 ? " | \(activeSession().otherFileCount) other files" : ""))
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .padding(.trailing, 8)
+
+                    Text(activeSession().metadataString)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
                 }
-                
-                if activeSession().showCopiedFeedback {
-                    Text("(Copied to clipboard)")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.green)
-                        .transition(.opacity)
-                }
-                
-                Spacer()
-                
-                Text("\(activeSession().imageItems.count) images" + (activeSession().otherFileCount > 0 ? " | \(activeSession().otherFileCount) other files" : ""))
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .padding(.trailing, 8)
-                
-                Text(activeSession().metadataString)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                .padding(.horizontal, 10)
+                .frame(height: 24)
+                .background(Color(NSColor.windowBackgroundColor))
             }
-            .padding(.horizontal, 10)
-            .frame(height: 24)
-            .background(Color(NSColor.windowBackgroundColor))
         }
     }
 
