@@ -425,10 +425,19 @@ struct FullScreenImageView: View {
     @StateObject private var zoomState = ZoomState()
     @State private var showUI: Bool = true
     @State private var notificationMessage: String? = nil
+    @State private var backgroundColorIndex: Int = 0
+
+    private let backgroundColors: [Color] = [
+        Color.black,           // 100% black
+        Color(white: 0.25),    // 75% black
+        Color(white: 0.5),     // 50% gray
+        Color(white: 0.75),    // 25% black
+        Color.white,           // 100% white
+    ]
     
     var body: some View {
         ZStack {
-            Color.black.opacity(0.9)
+            backgroundColors[backgroundColorIndex]
                 .ignoresSafeArea()
                 .onTapGesture { onClose() }
             
@@ -611,7 +620,11 @@ struct FullScreenImageView: View {
             Button(action: { copyToFavorites() }) { Text("") }
                 .keyboardShortcut("m", modifiers: [.command])
                 .opacity(0)
-                
+
+            Button(action: { cycleBackgroundColor() }) { Text("") }
+                .keyboardShortcut("1", modifiers: [.command])
+                .opacity(0)
+
             if let message = notificationMessage {
                 VStack {
                     Spacer()
@@ -755,7 +768,7 @@ struct FullScreenImageView: View {
         withAnimation {
             notificationMessage = message
         }
-        
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             withAnimation {
                 if notificationMessage == message {
@@ -763,6 +776,12 @@ struct FullScreenImageView: View {
                 }
             }
         }
+    }
+
+    private func cycleBackgroundColor() {
+        backgroundColorIndex = (backgroundColorIndex + 1) % backgroundColors.count
+        let colorNames = ["Black", "75% Black", "Gray", "25% Black", "White"]
+        showNotification("🎨 \(colorNames[backgroundColorIndex])")
     }
 }
 
@@ -1443,6 +1462,11 @@ struct ContentView: View {
                     if responderClassName.contains("Text") {
                         return event
                     }
+                }
+                
+                // Do not intercept grid navigation or file operations if an immersive view is active
+                if self.session.fullScreenImageURL != nil || self.sessionRight.fullScreenImageURL != nil || self.session.compareImageURLs != nil || self.sessionRight.compareImageURLs != nil {
+                    return event
                 }
                 
                 if commandPressed, let chars = event.charactersIgnoringModifiers?.lowercased() {
