@@ -1434,7 +1434,6 @@ struct ContentView: View {
     @StateObject private var sessionRight = BrowserSession()
     @State private var isSplitViewEnabled = false
     @State private var activePane: ActivePane = .left
-    @State private var currentColumnCount: Int = 1
     @State private var activeItemGlobalFrame: CGRect = .zero
     @State private var crossPaneCompareURLs: [URL]? = nil
 
@@ -2073,7 +2072,12 @@ struct ContentView: View {
                     }
                 } else { ImmersiveWindowController.shared.hide() }
             }
-            .onChange(of: session.activeItemURL) { _, newURL in session.updateMetadata(for: newURL) }
+            .onChange(of: session.activeItemURL) { _, newURL in
+                if newURL != nil {
+                    activePane = .left
+                }
+                session.updateMetadata(for: newURL)
+            }
             .onChange(of: sessionRight.fullScreenImageURL) { _, newURL in
                 if let url = newURL {
                     ImmersiveWindowController.shared.show {
@@ -2082,7 +2086,12 @@ struct ContentView: View {
                     }
                 } else if session.fullScreenImageURL == nil { ImmersiveWindowController.shared.hide() }
             }
-            .onChange(of: sessionRight.activeItemURL) { _, newURL in sessionRight.updateMetadata(for: newURL) }
+            .onChange(of: sessionRight.activeItemURL) { _, newURL in
+                if newURL != nil {
+                    activePane = .right
+                }
+                sessionRight.updateMetadata(for: newURL)
+            }
             .onChange(of: session.compareImageURLs) { _, newURLs in
                 if let urls = newURLs, urls.count == 2 {
                     ImmersiveWindowController.shared.show {

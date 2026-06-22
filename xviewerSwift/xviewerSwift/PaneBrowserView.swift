@@ -141,14 +141,11 @@ struct PaneBrowserView: View {
                     }
                 }
             }
-            .onChange(of: geometry.size.width) { oldWidth, newWidth in
-                session.currentColumnCount = GridLayout.columnCount(for: newWidth)
+            .onChange(of: columns, initial: true) { _, newColumns in
+                session.currentColumnCount = newColumns
             }
             .onChange(of: session.currentSortOrder) { oldOrder, newOrder in
                 session.folderContents = session.sortItems(session.folderContents)
-            }
-            .onAppear {
-                session.currentColumnCount = columns
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
