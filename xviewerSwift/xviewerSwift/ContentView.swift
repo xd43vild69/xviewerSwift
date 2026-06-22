@@ -2189,6 +2189,7 @@ struct ContentView: View {
                 }
                 updateWindowTitle()
             }
+
             .onChange(of: activeSession().currentFolderURL) { _, _ in updateWindowTitle() }
     }
     

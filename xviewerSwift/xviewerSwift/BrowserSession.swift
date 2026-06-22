@@ -168,6 +168,10 @@ class BrowserSession: ObservableObject {
 
     @Published var fileOperation = FileOperationState()
 
+    @Published var isShowingDeleteConfirmation = false
+    @Published var deleteConfirmationCount = 0
+    private var pendingDeleteURLs: [URL] = []
+
     var imageItems: [FileItem] {
         folderContents.filter { !$0.isDirectory }
     }
@@ -417,7 +421,17 @@ func copySelectedItemToClipboard() {
         if let fsURL = self.fullScreenImageURL { targets.insert(fsURL) }
         guard !targets.isEmpty else { return }
 
-        let nextURL = computeNextFocus(for: self.fullScreenImageURL ?? self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: targets)
+        pendingDeleteURLs = Array(targets)
+        deleteConfirmationCount = targets.count
+        performConfirmedDelete()
+    }
+
+    func performConfirmedDelete() {
+        let targets = pendingDeleteURLs
+        guard !targets.isEmpty else { return }
+        pendingDeleteURLs = []
+
+        let nextURL = computeNextFocus(for: self.fullScreenImageURL ?? self.activeItemURL ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: Set(targets))
 
         let operationID = UUID()
         fileOperation.cancellationToken = operationID
@@ -434,35 +448,38 @@ func copySelectedItemToClipboard() {
             var successCount = 0
             var deletedURLs: [URL] = []
             var hasErrors = false
-            var errorMessages: [String] = []
 
-            for url in targets {
-                let currentToken = await MainActor.run { self.fileOperation.cancellationToken }
-                if currentToken != operationID { break }
+            let accessedFlags = targets.map { $0.startAccessingSecurityScopedResource() }
 
-                let fileName = url.lastPathComponent
-                let accessed = url.startAccessingSecurityScopedResource()
-                
-                do {
-                    _ = try await NSWorkspace.shared.recycle([url])
-                    await MainActor.run {
+            do {
+                _ = try await NSWorkspace.shared.recycle(targets)
+                deletedURLs = targets
+                successCount = targets.count
+                await MainActor.run {
+                    for url in targets {
                         self.recordOperation(.delete(source: url))
                     }
-                    deletedURLs.append(url)
-                    successCount += 1
-                } catch {
-                    hasErrors = true
-                    errorMessages.append("❌ \(fileName): \(error.localizedDescription)")
-                    print("Error moving file to trash \(fileName): \(error)")
-                }
-                
-                if accessed { url.stopAccessingSecurityScopedResource() }
-
-                await MainActor.run {
                     self.fileOperation.processedCount = successCount
-                    self.fileOperation.progress = Double(successCount) / Double(targets.count)
-                    self.fileOperation.currentFile = fileName
+                    self.fileOperation.progress = 1.0
                 }
+            } catch {
+                hasErrors = true
+                print("Error moving files to trash: \(error)")
+                for url in targets {
+                    if !FileManager.default.fileExists(atPath: url.path) {
+                        deletedURLs.append(url)
+                        successCount += 1
+                        await MainActor.run {
+                            self.recordOperation(.delete(source: url))
+                            self.fileOperation.processedCount = successCount
+                            self.fileOperation.progress = Double(successCount) / Double(targets.count)
+                        }
+                    }
+                }
+            }
+
+            for (url, accessed) in zip(targets, accessedFlags) {
+                if accessed { url.stopAccessingSecurityScopedResource() }
             }
 
             await MainActor.run {
