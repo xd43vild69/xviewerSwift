@@ -1992,7 +1992,7 @@ struct ContentView: View {
 
                     Spacer()
 
-                    Text("\(activeSession().imageItems.count) images" + (activeSession().otherFileCount > 0 ? " | \(activeSession().otherFileCount) other files" : ""))
+                    Text("\(activeSession().imageItems.count) images" + (activeSession().otherFilesDisplayCount > 0 ? " | \(activeSession().otherFilesDisplayCount) other files" : ""))
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .padding(.trailing, 8)

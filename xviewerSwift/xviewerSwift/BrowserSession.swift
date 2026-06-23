@@ -177,6 +177,10 @@ class BrowserSession: ObservableObject {
         folderContents.filter { !$0.isDirectory && $0.isImage }
     }
 
+    var otherFilesDisplayCount: Int {
+        showAllFiles ? folderContents.filter { !$0.isDirectory && !$0.isImage }.count : otherFileCount
+    }
+
     var canGoBack: Bool {
         navigationIndex > 0
     }
