@@ -128,6 +128,7 @@ class BrowserSession: ObservableObject {
     @Published var metadataString: String = ""
     @Published var otherFileCount: Int = 0
     @Published var isScrolling: Bool = false
+    @Published var showAllFiles: Bool = false
 
     /// Referencia compartida para registrar visitas recientes desde cualquier ruta de navegación
     /// (incluyendo Enter key y navegar a carpeta padre, que antes no registraban).
@@ -173,7 +174,7 @@ class BrowserSession: ObservableObject {
     private var pendingDeleteURLs: [URL] = []
 
     var imageItems: [FileItem] {
-        folderContents.filter { !$0.isDirectory }
+        folderContents.filter { !$0.isDirectory && $0.isImage }
     }
 
     var canGoBack: Bool {
@@ -1551,7 +1552,8 @@ func copySelectedItemToClipboard() {
         }
         thumbnailLoader.maxTasks = isLocalFolder ? 24 : 6
 
-        loadTask = Task.detached(priority: .userInitiated) { [weak self, isLocalFolder] in
+        let showAllFilesLocal = self.showAllFiles
+        loadTask = Task.detached(priority: .userInitiated) { [weak self, isLocalFolder, showAllFilesLocal] in
             guard let self else { return }
 
             let keys: [URLResourceKey] = [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey]
@@ -1610,7 +1612,11 @@ func copySelectedItemToClipboard() {
                     if imageExtensions.contains(ext) {
                         batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
                     } else {
-                        otherCountLocal += 1
+                        if showAllFilesLocal {
+                            batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
+                        } else {
+                            otherCountLocal += 1
+                        }
                     }
                 } else {
                     batch.append(FileItem(url: fileURL, name: fileName, isDirectory: true, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
@@ -1653,7 +1659,7 @@ func copySelectedItemToClipboard() {
                 }
 
                 // Pre-generación inteligente: Fase 1 (visibles) + Fase 2 (rest)
-                let itemsToPreload = sortedItems.filter { !$0.isDirectory }
+                let itemsToPreload = sortedItems.filter { !$0.isDirectory && $0.isImage }
                 let visibleCount = 40
                 let (visibleItems, restItems) = (
                     Array(itemsToPreload.prefix(visibleCount)),

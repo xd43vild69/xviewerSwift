@@ -38,6 +38,11 @@ struct FileItem: Identifiable, Hashable {
     let creationDate: Date
     let fileSize: Int64
     let isLocal: Bool
+
+    var isImage: Bool {
+        let ext = url.pathExtension.lowercased()
+        return ["jpg", "jpeg", "png", "gif", "heic", "webp"].contains(ext)
+    }
 }
 
 extension String {
@@ -268,7 +273,13 @@ struct FileItemView: View {
 
     var body: some View {
         Group {
-            if let thumbnail = thumbnail {
+            if !item.isImage {
+                Image(nsImage: NSWorkspace.shared.icon(forFileType: item.url.pathExtension))
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 80, height: 80)
+                    .cornerRadius(8)
+            } else if let thumbnail = thumbnail {
                 Image(nsImage: thumbnail)
                     .resizable()
                     .scaledToFit()
@@ -1191,11 +1202,13 @@ struct GridItemCell: View {
         )
         .help(item.url.lastPathComponent)
         .onTapGesture(count: 2) {
-            activeItemURL = item.url
-            selectedItemURLs = [item.url]
             if item.isDirectory {
+                activeItemURL = item.url
+                selectedItemURLs = [item.url]
                 loadFolderAction(item.url)
-            } else {
+            } else if item.isImage {
+                activeItemURL = item.url
+                selectedItemURLs = [item.url]
                 fullScreenImageURL = item.url
             }
         }
@@ -1440,10 +1453,16 @@ struct ContentView: View {
     private var crossPaneSelectedImages: [URL]? {
         guard isSplitViewEnabled else { return nil }
         let leftImgs = session.selectedItemURLs.filter { url in
-            session.folderContents.first(where: { $0.url == url })?.isDirectory == false
+            if let found = session.folderContents.first(where: { $0.url == url }) {
+                return !found.isDirectory && found.isImage
+            }
+            return false
         }
         let rightImgs = sessionRight.selectedItemURLs.filter { url in
-            sessionRight.folderContents.first(where: { $0.url == url })?.isDirectory == false
+            if let found = sessionRight.folderContents.first(where: { $0.url == url }) {
+                return !found.isDirectory && found.isImage
+            }
+            return false
         }
         guard leftImgs.count == 1, rightImgs.count == 1 else { return nil }
         return [leftImgs.first!, rightImgs.first!]
@@ -2001,7 +2020,10 @@ struct ContentView: View {
                         sidebarSelection: $sidebarSelection,
                         session: session,
                         otherPaneSelectedImageCount: sessionRight.selectedItemURLs.filter { url in
-                            sessionRight.folderContents.first(where: { $0.url == url })?.isDirectory == false
+                            if let found = sessionRight.folderContents.first(where: { $0.url == url }) {
+                                return !found.isDirectory && found.isImage
+                            }
+                            return false
                         }.count,
                         crossPaneCompareAction: {
                             if let urls = crossPaneSelectedImages {
@@ -2021,7 +2043,10 @@ struct ContentView: View {
                         sidebarSelection: $sidebarSelectionRight,
                         session: sessionRight,
                         otherPaneSelectedImageCount: session.selectedItemURLs.filter { url in
-                            session.folderContents.first(where: { $0.url == url })?.isDirectory == false
+                            if let found = session.folderContents.first(where: { $0.url == url }) {
+                                return !found.isDirectory && found.isImage
+                            }
+                            return false
                         }.count,
                         crossPaneCompareAction: {
                             if let urls = crossPaneSelectedImages {
@@ -2162,6 +2187,20 @@ struct ContentView: View {
                         Label("Clear Memory", systemImage: "arrow.clockwise")
                     }
                     .help("Clear Cache & Free Memory")
+                    Button {
+                        let newValue = !session.showAllFiles
+                        session.showAllFiles = newValue
+                        if let url = session.currentFolderURL {
+                            session.loadFolder(url: url, sidebarManager: sidebarManager)
+                        }
+                        sessionRight.showAllFiles = newValue
+                        if isSplitViewEnabled, let url = sessionRight.currentFolderURL {
+                            sessionRight.loadFolder(url: url, sidebarManager: sidebarManager)
+                        }
+                    } label: {
+                        Label(session.showAllFiles ? "Hide Other Files" : "Show All Files", systemImage: session.showAllFiles ? "eye" : "eye.slash")
+                    }
+                    .help(session.showAllFiles ? "Show only images" : "Show all file types")
                     Button {
                         withAnimation {
                             isSplitViewEnabled.toggle()

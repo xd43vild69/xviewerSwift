@@ -73,7 +73,10 @@ struct PaneBrowserView: View {
                                 isActive: session.activeItemURL == item.url,
                                 canCompare: {
                                     let thisPaneImages = session.selectedItemURLs.filter { url in
-                                        session.folderContents.first(where: { $0.url == url })?.isDirectory == false
+                                        if let found = session.folderContents.first(where: { $0.url == url }) {
+                                            return !found.isDirectory && found.isImage
+                                        }
+                                        return false
                                     }
                                     let samePaneOk = thisPaneImages.count == 2
                                         && !item.isDirectory
@@ -87,7 +90,12 @@ struct PaneBrowserView: View {
                                 }(),
                                 compareAction: {
                                     let singlePaneURLs = Array(session.selectedItemURLs)
-                                        .filter { url in session.folderContents.first(where: { $0.url == url })?.isDirectory == false }
+                                        .filter { url in
+                                            if let found = session.folderContents.first(where: { $0.url == url }) {
+                                                return !found.isDirectory && found.isImage
+                                            }
+                                            return false
+                                        }
                                     if singlePaneURLs.count == 2 {
                                         session.compareImageURLs = singlePaneURLs
                                     } else {
