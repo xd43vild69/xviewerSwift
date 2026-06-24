@@ -153,7 +153,7 @@ struct PaneBrowserView: View {
                 session.currentColumnCount = newColumns
             }
             .onChange(of: session.currentSortOrder) { oldOrder, newOrder in
-                session.folderContents = session.sortItems(session.folderContents)
+                session.updateFilteredFolderContents()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

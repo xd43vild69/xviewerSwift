@@ -124,11 +124,46 @@ class BrowserSession: ObservableObject {
     @Published var fullScreenImageURL: URL?
     @Published var selectedItemURLs: Set<URL> = []
     @Published var activeItemURL: URL?
-    @Published var currentSortOrder: SortOrder = .name
+    @Published var currentSortOrder: SortOrder = .name {
+        didSet {
+            updateFilteredFolderContents()
+        }
+    }
     @Published var metadataString: String = ""
     @Published var otherFileCount: Int = 0
     @Published var isScrolling: Bool = false
     @Published var showAllFiles: Bool = false
+
+    @Published var filterText: String = "" {
+        didSet {
+            updateFilteredFolderContents()
+        }
+    }
+    @Published var isFilterBarPresented: Bool = false
+    var allFolderContents: [FileItem] = []
+
+    func updateFilteredFolderContents() {
+        let sorted = self.sortItems(allFolderContents)
+        if filterText.isEmpty {
+            self.folderContents = sorted
+        } else {
+            self.folderContents = sorted.filter { item in
+                item.name.localizedCaseInsensitiveContains(filterText)
+            }
+        }
+        
+        // Ensure active and selected items are still in the visible set
+        let visibleURLs = Set(self.folderContents.map { $0.url })
+        self.selectedItemURLs = self.selectedItemURLs.intersection(visibleURLs)
+        if let active = self.activeItemURL, !visibleURLs.contains(active) {
+            self.activeItemURL = self.folderContents.first?.url
+            if let firstVisible = self.folderContents.first?.url {
+                self.selectedItemURLs = [firstVisible]
+            } else {
+                self.selectedItemURLs = []
+            }
+        }
+    }
 
     /// Referencia compartida para registrar visitas recientes desde cualquier ruta de navegación
     /// (incluyendo Enter key y navegar a carpeta padre, que antes no registraban).
@@ -488,7 +523,8 @@ func copySelectedItemToClipboard() {
             }
 
             await MainActor.run {
-                self.folderContents.removeAll(where: { deletedURLs.contains($0.url) })
+                self.allFolderContents.removeAll(where: { deletedURLs.contains($0.url) })
+                self.updateFilteredFolderContents()
                 self.selectedItemURLs = []
                 if let next = nextURL {
                     self.selectedItemURLs = [next]
@@ -580,7 +616,8 @@ func copySelectedItemToClipboard() {
                     }
 
                     DispatchQueue.main.async { [weak self] in
-                        self?.folderContents.removeAll(where: { movedURLs.contains($0.url) })
+                        self?.allFolderContents.removeAll(where: { movedURLs.contains($0.url) })
+                        self?.updateFilteredFolderContents()
                         self?.selectedItemURLs = []
                         if let next = nextURL {
                             self?.selectedItemURLs = [next]
@@ -779,7 +816,8 @@ func copySelectedItemToClipboard() {
 
                     DispatchQueue.main.async { [weak self] in
                         let nextFocus = self?.computeNextFocus(for: self?.activeItemURL ?? self?.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: successfullyMoved)
-                        self?.folderContents.removeAll(where: { successfullyMoved.contains($0.url) })
+                        self?.allFolderContents.removeAll(where: { successfullyMoved.contains($0.url) })
+                        self?.updateFilteredFolderContents()
                         self?.selectedItemURLs.subtract(successfullyMoved)
                         if let next = nextFocus {
                             self?.activeItemURL = next
@@ -1538,6 +1576,9 @@ func copySelectedItemToClipboard() {
         }
 
         self.currentFolderURL = url
+        self.filterText = ""
+        self.isFilterBarPresented = false
+        self.allFolderContents = []
         self.folderContents = []
         self.otherFileCount = 0
 
@@ -1572,6 +1613,7 @@ func copySelectedItemToClipboard() {
                 if Task.isCancelled { return }
                 await MainActor.run {
                     guard self.currentFolderURL == url else { return }
+                    self.allFolderContents = []
                     self.folderContents = []
                     self.showNotification("⏱️ Folder load timed out")
                 }
@@ -1582,6 +1624,7 @@ func copySelectedItemToClipboard() {
                 if Task.isCancelled { return }
                 await MainActor.run {
                     guard self.currentFolderURL == url else { return }
+                    self.allFolderContents = []
                     self.folderContents = []
                 }
                 return
@@ -1636,10 +1679,11 @@ func copySelectedItemToClipboard() {
                     let countSnapshot = otherCountLocal
                     await MainActor.run {
                         guard self.currentFolderURL == url else { return }
-                        self.folderContents = snapshot
+                        self.allFolderContents = snapshot
+                        self.updateFilteredFolderContents()
                         self.otherFileCount = countSnapshot
                         if self.activeItemURL == nil {
-                            if let u = snapshot.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
+                            if let u = self.folderContents.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
                         }
                     }
                 }
@@ -1655,10 +1699,11 @@ func copySelectedItemToClipboard() {
 
                 await MainActor.run {
                     guard self.currentFolderURL == url else { return }
-                    self.folderContents = sortedItems
+                    self.allFolderContents = sortedItems
+                    self.updateFilteredFolderContents()
                     self.otherFileCount = otherCountLocal
                     if self.activeItemURL == nil {
-                        if let u = sortedItems.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
+                        if let u = self.folderContents.first?.url { self.activeItemURL = u; self.selectedItemURLs = [u] }
                     }
                 }
 
@@ -1695,6 +1740,7 @@ func copySelectedItemToClipboard() {
             } else {
                 await MainActor.run {
                     guard self.currentFolderURL == url else { return }
+                    self.allFolderContents = []
                     self.folderContents = []
                     self.otherFileCount = otherCountLocal
                 }

@@ -1450,6 +1450,12 @@ struct ContentView: View {
     @State private var activeItemGlobalFrame: CGRect = .zero
     @State private var crossPaneCompareURLs: [URL]? = nil
 
+    enum FocusField: Hashable {
+        case filterInputLeft
+        case filterInputRight
+    }
+    @FocusState private var focusedField: FocusField?
+
     private var crossPaneSelectedImages: [URL]? {
         guard isSplitViewEnabled else { return nil }
         let leftImgs = session.selectedItemURLs.filter { url in
@@ -1636,6 +1642,21 @@ struct ContentView: View {
                         return nil // consume event
                     case 120: // F2 key
                         activeSession().renameSelected()
+                        return nil // consume event
+                    case 99: // F3 key
+                        let activeSess = activeSession()
+                        if !activeSess.filterText.isEmpty {
+                            activeSess.filterText = ""
+                            activeSess.isFilterBarPresented = false
+                            focusedField = nil
+                        } else {
+                            activeSess.isFilterBarPresented.toggle()
+                            if activeSess.isFilterBarPresented {
+                                focusedField = (activePane == .left) ? .filterInputLeft : .filterInputRight
+                            } else {
+                                focusedField = nil
+                            }
+                        }
                         return nil // consume event
                     case 123: // Left arrow
                         activeSession().handleLeftArrow(shift: shiftPressed)
@@ -2183,6 +2204,86 @@ struct ContentView: View {
             }
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
+                    if session.isFilterBarPresented || !session.filterText.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(.secondary)
+                                .font(.system(size: 11))
+                            TextField(isSplitViewEnabled ? "Filter Left..." : "Filter...", text: $session.filterText)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12))
+                                .frame(width: 120)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color(NSColor.controlBackgroundColor))
+                                .cornerRadius(4)
+                                .focused($focusedField, equals: .filterInputLeft)
+                                .onSubmit {
+                                    focusedField = nil
+                                }
+                                .onExitCommand {
+                                    session.filterText = ""
+                                    session.isFilterBarPresented = false
+                                    focusedField = nil
+                                }
+                            if !session.filterText.isEmpty {
+                                Button(action: {
+                                    session.filterText = ""
+                                    session.isFilterBarPresented = false
+                                    focusedField = nil
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(6)
+                    }
+
+                    if isSplitViewEnabled && (sessionRight.isFilterBarPresented || !sessionRight.filterText.isEmpty) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(.secondary)
+                                .font(.system(size: 11))
+                            TextField("Filter Right...", text: $sessionRight.filterText)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12))
+                                .frame(width: 120)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color(NSColor.controlBackgroundColor))
+                                .cornerRadius(4)
+                                .focused($focusedField, equals: .filterInputRight)
+                                .onSubmit {
+                                    focusedField = nil
+                                }
+                                .onExitCommand {
+                                    sessionRight.filterText = ""
+                                    sessionRight.isFilterBarPresented = false
+                                    focusedField = nil
+                                }
+                            if !sessionRight.filterText.isEmpty {
+                                Button(action: {
+                                    sessionRight.filterText = ""
+                                    sessionRight.isFilterBarPresented = false
+                                    focusedField = nil
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(6)
+                    }
+
                     Button { clearApplicationMemory() } label: {
                         Label("Clear Memory", systemImage: "arrow.clockwise")
                     }
