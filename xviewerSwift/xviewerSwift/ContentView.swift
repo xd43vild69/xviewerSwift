@@ -1449,6 +1449,9 @@ struct ContentView: View {
     @State private var activePane: ActivePane = .left
     @State private var activeItemGlobalFrame: CGRect = .zero
     @State private var crossPaneCompareURLs: [URL]? = nil
+    @State private var sidebarWidth: CGFloat = 180
+    @State private var startingWidth: CGFloat = 180
+    @State private var isResizingSidebar = false
 
     enum FocusField: Hashable {
         case filterInputLeft
@@ -2108,7 +2111,38 @@ struct ContentView: View {
     private func browserContent(width: CGFloat) -> some View {
         HStack(spacing: 0) {
             leftPanel
-                .frame(width: width * 0.1)
+                .frame(width: sidebarWidth)
+
+            // Divisor resizable con cursor
+            VStack(spacing: 0) {
+                Divider()
+                    .frame(maxHeight: .infinity)
+            }
+            .frame(width: 6)
+            .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active:
+                    NSCursor.resizeLeftRight.push()
+                case .ended:
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        if !isResizingSidebar {
+                            isResizingSidebar = true
+                            startingWidth = sidebarWidth
+                        }
+                        let newWidth = startingWidth + value.translation.width
+                        sidebarWidth = max(100, min(200, newWidth))
+                    }
+                    .onEnded { _ in
+                        isResizingSidebar = false
+                    }
+            )
+
             if isSplitViewEnabled {
                 HSplitView {
                     PaneBrowserView(
