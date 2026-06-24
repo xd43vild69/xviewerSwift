@@ -1563,8 +1563,13 @@ struct ContentView: View {
                 let commandPressed = event.modifierFlags.contains(.command)
                 
                 // If a filter text field is focused, do not intercept keyboard events at all,
-                // except for F3 (keycode 99) which resets/closes it.
+                // except for F3 (keycode 99) and Tab (keycode 48) which resign focus.
                 if focusedField == .filterInputLeft || focusedField == .filterInputRight {
+                    if event.keyCode == 48 {
+                        focusedField = nil
+                        NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
+                        return nil // consume event
+                    }
                     if event.keyCode != 99 {
                         return event
                     }
