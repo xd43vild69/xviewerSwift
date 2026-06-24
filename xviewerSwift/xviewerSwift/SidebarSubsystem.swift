@@ -44,7 +44,7 @@ class SidebarManager: ObservableObject {
     private let networkKey = "sidebar_network_v1"
     private let recentKey = "sidebar_recent_v2"
 
-    private let maxRecentItems = 13
+    private let maxRecentItems = 7
     private let recencyWeightDays = 30.0
 
     private var accessedURLs: [URL] = []
