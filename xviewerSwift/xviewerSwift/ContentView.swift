@@ -1570,7 +1570,7 @@ struct ContentView: View {
                     }
                 }
 
-                // Allow normal typing/navigation in text input fields (e.g. rename textfields)
+                // Allow normal typing/navigation in text input fields (e.g. rename textfields, filter textfields)
                 if let responder = NSApp.keyWindow?.firstResponder {
                     let responderClassName = String(describing: type(of: responder))
                     if responderClassName.contains("Text") {
@@ -1579,9 +1579,11 @@ struct ContentView: View {
                         }
                     }
                 }
-                
-                // Do not intercept grid navigation or file operations if an immersive view is active
-                if self.session.fullScreenImageURL != nil || self.sessionRight.fullScreenImageURL != nil || self.session.compareImageURLs != nil || self.sessionRight.compareImageURLs != nil {
+
+                // Do not intercept grid navigation or file operations if an immersive view, sheet, or settings is active
+                if self.isShowingSettings || self.session.isShowingProperties || self.sessionRight.isShowingProperties ||
+                   self.session.fullScreenImageURL != nil || self.sessionRight.fullScreenImageURL != nil || 
+                   self.session.compareImageURLs != nil || self.sessionRight.compareImageURLs != nil {
                     return event
                 }
                 
@@ -2092,7 +2094,11 @@ struct ContentView: View {
                         }
                     )
                     .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
-                    .simultaneousGesture(TapGesture().onEnded { activePane = .left })
+                    .simultaneousGesture(TapGesture().onEnded {
+                        activePane = .left
+                        focusedField = nil
+                        NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
+                    })
                     .overlay(alignment: .top) {
                         if activePane == .left {
                             Rectangle().fill(Color.blue).frame(height: 2)
@@ -2115,7 +2121,11 @@ struct ContentView: View {
                         }
                     )
                     .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
-                    .simultaneousGesture(TapGesture().onEnded { activePane = .right })
+                    .simultaneousGesture(TapGesture().onEnded {
+                        activePane = .right
+                        focusedField = nil
+                        NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
+                    })
                     .overlay(alignment: .top) {
                         if activePane == .right {
                             Rectangle().fill(Color.blue).frame(height: 2)
@@ -2125,6 +2135,11 @@ struct ContentView: View {
             } else {
                 PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .simultaneousGesture(TapGesture().onEnded {
+                        activePane = .left
+                        focusedField = nil
+                        NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
+                    })
             }
         }
     }
@@ -2243,7 +2258,7 @@ struct ContentView: View {
                     self.focusSearchField(for: .left)
                 } else if focusedField == .filterInputLeft {
                     focusedField = nil
-                    NSApp.keyWindow?.makeFirstResponder(nil)
+                    NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
                 }
             }
             .onChange(of: sessionRight.isFilterBarPresented) { _, isPresented in
@@ -2252,7 +2267,7 @@ struct ContentView: View {
                     self.focusSearchField(for: .right)
                 } else if focusedField == .filterInputRight {
                     focusedField = nil
-                    NSApp.keyWindow?.makeFirstResponder(nil)
+                    NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
                 }
             }
         )
@@ -2293,20 +2308,21 @@ struct ContentView: View {
                                 .focused($focusedField, equals: .filterInputLeft)
                                 .onSubmit {
                                     focusedField = nil
-                                    NSApp.keyWindow?.makeFirstResponder(nil)
+                                    NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
                                 }
                                 .onExitCommand {
-                                    session.filterText = ""
-                                    session.isFilterBarPresented = false
+                                    if session.filterText.isEmpty {
+                                        session.isFilterBarPresented = false
+                                    }
                                     focusedField = nil
-                                    NSApp.keyWindow?.makeFirstResponder(nil)
+                                    NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
                                 }
                             if !session.filterText.isEmpty {
                                 Button(action: {
                                     session.filterText = ""
                                     session.isFilterBarPresented = false
                                     focusedField = nil
-                                    NSApp.keyWindow?.makeFirstResponder(nil)
+                                    NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
                                 }) {
                                     Image(systemName: "xmark.circle.fill")
                                         .foregroundColor(.secondary)
@@ -2336,20 +2352,21 @@ struct ContentView: View {
                                 .focused($focusedField, equals: .filterInputRight)
                                 .onSubmit {
                                     focusedField = nil
-                                    NSApp.keyWindow?.makeFirstResponder(nil)
+                                    NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
                                 }
                                 .onExitCommand {
-                                    sessionRight.filterText = ""
-                                    sessionRight.isFilterBarPresented = false
+                                    if sessionRight.filterText.isEmpty {
+                                        sessionRight.isFilterBarPresented = false
+                                    }
                                     focusedField = nil
-                                    NSApp.keyWindow?.makeFirstResponder(nil)
+                                    NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
                                 }
                             if !sessionRight.filterText.isEmpty {
                                 Button(action: {
                                     sessionRight.filterText = ""
                                     sessionRight.isFilterBarPresented = false
                                     focusedField = nil
-                                    NSApp.keyWindow?.makeFirstResponder(nil)
+                                    NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
                                 }) {
                                     Image(systemName: "xmark.circle.fill")
                                         .foregroundColor(.secondary)
