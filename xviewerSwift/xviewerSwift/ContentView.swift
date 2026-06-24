@@ -1967,6 +1967,35 @@ struct ContentView: View {
             Button(action: { activeSession().createNewFolder() }) { Text("") }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .opacity(0)
+
+            Button(action: { mountConfiguredServer() }) { Text("") }
+                .keyboardShortcut("k", modifiers: [.command])
+                .opacity(0)
+        }
+    }
+
+    /// Monta el servidor SMB configurado (⌘K, estilo Finder) y navega a él.
+    private func mountConfiguredServer() {
+        let server = "smb://100.91.194.32/Disk13"
+        let pane = activeSession()
+        pane.showNotification("Conectando a \(server)…")
+
+        NetworkMount.mount(server) { result in
+            switch result {
+            case .success(let url):
+                // Agregar a la sección Network del sidebar
+                sidebarManager.addNetworkMount(url: url)
+
+                // Activar visualmente (seleccionar la carpeta padre)
+                if isSplitViewEnabled && activePane == .right {
+                    sidebarSelectionRight = url
+                } else {
+                    sidebarSelection = url
+                }
+                pane.showNotification("Montado: \(url.lastPathComponent)")
+            case .failure(let error):
+                pane.showNotification("Error: \(error.localizedDescription)")
+            }
         }
     }
 

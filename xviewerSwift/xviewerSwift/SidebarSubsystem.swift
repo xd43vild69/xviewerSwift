@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 
 enum SidebarSection: String, CaseIterable {
     case sources = "Sources"
+    case network = "Network"
     case bookmarks = "Bookmarks"
     case recent = "Recents"
 }
@@ -35,10 +36,12 @@ struct PersistedSidebarItem: Codable {
 @MainActor
 class SidebarManager: ObservableObject {
     @Published var sources: [SidebarFolderItem] = []
+    @Published var network: [SidebarFolderItem] = []
     @Published var bookmarks: [SidebarFolderItem] = []
     @Published var recent: [SidebarFolderItem] = []
 
     private let bookmarksKey = "sidebar_bookmarks_v1"
+    private let networkKey = "sidebar_network_v1"
     private let recentKey = "sidebar_recent_v2"
 
     private let maxRecentItems = 13
@@ -189,6 +192,23 @@ class SidebarManager: ObservableObject {
         bookmarks.removeAll { $0.url == url }
         saveState()
     }
+
+    func addNetworkMount(url: URL) {
+        guard !network.contains(where: { $0.url == url }) else { return }
+        let bData = createBookmark(for: url)
+        let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "network", visitCount: 1, bookmarkData: bData)
+        network.append(newItem)
+        saveState()
+    }
+
+    func removeNetworkMount(url: URL) {
+        if let item = network.first(where: { $0.url == url }), item.isSecurityScopedAccessActive {
+            url.stopAccessingSecurityScopedResource()
+            accessedURLs.removeAll { $0 == url }
+        }
+        network.removeAll { $0.url == url }
+        saveState()
+    }
     
     private func createBookmark(for url: URL) -> Data? {
         do {
@@ -218,11 +238,13 @@ class SidebarManager: ObservableObject {
     
     private func saveState() {
         saveItems(bookmarks, forKey: bookmarksKey)
+        saveItems(network, forKey: networkKey)
         saveItems(recent, forKey: recentKey)
     }
-    
+
     private func loadState() {
         bookmarks = loadItems(forKey: bookmarksKey)
+        network = loadItems(forKey: networkKey)
 
         let loadedRecent = loadItems(forKey: recentKey)
         recent = loadedRecent.map { item in
@@ -309,6 +331,23 @@ struct SidebarNavigationView: View {
                 ForEach(manager.sources) { item in
                     SidebarItemRow(item: item, performDropAction: performDropAction)
                         .tag(item.url)
+                }
+            }
+
+            // Sección: Network
+            if !manager.network.isEmpty {
+                Section(header: Text(SidebarSection.network.rawValue)) {
+                    ForEach(manager.network) { item in
+                        SidebarItemRow(item: item, performDropAction: performDropAction)
+                            .tag(item.url)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    manager.removeNetworkMount(url: item.url)
+                                } label: {
+                                    Label("Desconectar", systemImage: "trash")
+                                }
+                            }
+                    }
                 }
             }
 
