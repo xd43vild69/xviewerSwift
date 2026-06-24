@@ -1,7 +1,2 @@
+TODO 
 🔴 - Rename app
-
-
----
-
-
-

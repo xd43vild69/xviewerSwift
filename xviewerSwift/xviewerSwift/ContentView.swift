@@ -1562,11 +1562,21 @@ struct ContentView: View {
                 let shiftPressed = event.modifierFlags.contains(.shift)
                 let commandPressed = event.modifierFlags.contains(.command)
                 
+                // If a filter text field is focused, do not intercept keyboard events at all,
+                // except for F3 (keycode 99) which resets/closes it.
+                if focusedField == .filterInputLeft || focusedField == .filterInputRight {
+                    if event.keyCode != 99 {
+                        return event
+                    }
+                }
+
                 // Allow normal typing/navigation in text input fields (e.g. rename textfields)
                 if let responder = NSApp.keyWindow?.firstResponder {
                     let responderClassName = String(describing: type(of: responder))
                     if responderClassName.contains("Text") {
-                        return event
+                        if event.keyCode != 99 {
+                            return event
+                        }
                     }
                 }
                 
@@ -1648,14 +1658,8 @@ struct ContentView: View {
                         if !activeSess.filterText.isEmpty {
                             activeSess.filterText = ""
                             activeSess.isFilterBarPresented = false
-                            focusedField = nil
                         } else {
                             activeSess.isFilterBarPresented.toggle()
-                            if activeSess.isFilterBarPresented {
-                                focusedField = (activePane == .left) ? .filterInputLeft : .filterInputRight
-                            } else {
-                                focusedField = nil
-                            }
                         }
                         return nil // consume event
                     case 123: // Left arrow
@@ -1693,6 +1697,41 @@ struct ContentView: View {
             return sessionRight
         }
         return session
+    }
+
+    private func focusSearchField(for pane: ActivePane) {
+        guard let window = NSApp.keyWindow else { return }
+        
+        let targetPlaceholder = (pane == .left) 
+            ? (isSplitViewEnabled ? "Filter Left..." : "Filter...") 
+            : "Filter Right..."
+            
+        func findTextField(in view: NSView) -> NSTextField? {
+            if let tf = view as? NSTextField, tf.isEditable {
+                if tf.placeholderString == targetPlaceholder {
+                    return tf
+                }
+            }
+            for subview in view.subviews {
+                if let found = findTextField(in: subview) {
+                    return found
+                }
+            }
+            return nil
+        }
+        
+        // Wait, give SwiftUI 0.1 seconds to render the TextField view in the toolbar
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if let frameView = window.contentView?.superview,
+               let tf = findTextField(in: frameView) {
+                window.makeFirstResponder(tf)
+                // Also, move the cursor to the end of the text if it has text
+                if let editor = tf.currentEditor() {
+                    let end = tf.stringValue.count
+                    editor.selectedRange = NSRange(location: end, length: 0)
+                }
+            }
+        }
     }
 
     private func clearApplicationMemory() {
@@ -2091,19 +2130,23 @@ struct ContentView: View {
     }
 
     private var mainLayout: some View {
-        GeometryReader { mainGeometry in
-            ZStack {
-                browserContent(width: mainGeometry.size.width)
-                shortcutsGroup
-                notificationOverlay
+        AnyView(
+            GeometryReader { mainGeometry in
+                ZStack {
+                    browserContent(width: mainGeometry.size.width)
+                    shortcutsGroup
+                    notificationOverlay
+                }
+                .safeAreaInset(edge: .bottom) { statusBar }
+                .frame(width: mainGeometry.size.width, height: mainGeometry.size.height)
             }
-            .safeAreaInset(edge: .bottom) { statusBar }
-            .frame(width: mainGeometry.size.width, height: mainGeometry.size.height)
-        }
+        )
     }
 
     private var layoutWithSessionObservers: some View {
-        mainLayout
+        var view = AnyView(mainLayout)
+        
+        view = AnyView(view
             .onChange(of: sidebarSelection) { _, newURL in
                 if let url = newURL { session.loadFolder(url: url, sidebarManager: sidebarManager) }
             }
@@ -2124,6 +2167,9 @@ struct ContentView: View {
                 }
                 session.updateMetadata(for: newURL)
             }
+        )
+        
+        view = AnyView(view
             .onChange(of: sessionRight.fullScreenImageURL) { _, newURL in
                 if let url = newURL {
                     ImmersiveWindowController.shared.show {
@@ -2156,6 +2202,9 @@ struct ContentView: View {
                     ImmersiveWindowController.shared.hide()
                 }
             }
+        )
+        
+        view = AnyView(view
             .onChange(of: crossPaneCompareURLs) { _, newURLs in
                 if let urls = newURLs, urls.count == 2 {
                     ImmersiveWindowController.shared.show {
@@ -2185,6 +2234,30 @@ struct ContentView: View {
                     }
                 }
             }
+        )
+        
+        view = AnyView(view
+            .onChange(of: session.isFilterBarPresented) { _, isPresented in
+                if isPresented {
+                    focusedField = .filterInputLeft
+                    self.focusSearchField(for: .left)
+                } else if focusedField == .filterInputLeft {
+                    focusedField = nil
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                }
+            }
+            .onChange(of: sessionRight.isFilterBarPresented) { _, isPresented in
+                if isPresented {
+                    focusedField = .filterInputRight
+                    self.focusSearchField(for: .right)
+                } else if focusedField == .filterInputRight {
+                    focusedField = nil
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                }
+            }
+        )
+        
+        return view
     }
 
     var body: some View {
@@ -2220,17 +2293,20 @@ struct ContentView: View {
                                 .focused($focusedField, equals: .filterInputLeft)
                                 .onSubmit {
                                     focusedField = nil
+                                    NSApp.keyWindow?.makeFirstResponder(nil)
                                 }
                                 .onExitCommand {
                                     session.filterText = ""
                                     session.isFilterBarPresented = false
                                     focusedField = nil
+                                    NSApp.keyWindow?.makeFirstResponder(nil)
                                 }
                             if !session.filterText.isEmpty {
                                 Button(action: {
                                     session.filterText = ""
                                     session.isFilterBarPresented = false
                                     focusedField = nil
+                                    NSApp.keyWindow?.makeFirstResponder(nil)
                                 }) {
                                     Image(systemName: "xmark.circle.fill")
                                         .foregroundColor(.secondary)
@@ -2260,17 +2336,20 @@ struct ContentView: View {
                                 .focused($focusedField, equals: .filterInputRight)
                                 .onSubmit {
                                     focusedField = nil
+                                    NSApp.keyWindow?.makeFirstResponder(nil)
                                 }
                                 .onExitCommand {
                                     sessionRight.filterText = ""
                                     sessionRight.isFilterBarPresented = false
                                     focusedField = nil
+                                    NSApp.keyWindow?.makeFirstResponder(nil)
                                 }
                             if !sessionRight.filterText.isEmpty {
                                 Button(action: {
                                     sessionRight.filterText = ""
                                     sessionRight.isFilterBarPresented = false
                                     focusedField = nil
+                                    NSApp.keyWindow?.makeFirstResponder(nil)
                                 }) {
                                     Image(systemName: "xmark.circle.fill")
                                         .foregroundColor(.secondary)
