@@ -1449,9 +1449,10 @@ struct ContentView: View {
     @State private var activePane: ActivePane = .left
     @State private var activeItemGlobalFrame: CGRect = .zero
     @State private var crossPaneCompareURLs: [URL]? = nil
-    @State private var sidebarWidth: CGFloat = 180
-    @State private var startingWidth: CGFloat = 180
+    @State private var sidebarWidth: CGFloat = 160
+    @State private var startingWidth: CGFloat = 160
     @State private var isResizingSidebar = false
+    @State private var isCursorPushed = false
 
     enum FocusField: Hashable {
         case filterInputLeft
@@ -2123,9 +2124,15 @@ struct ContentView: View {
             .onContinuousHover { phase in
                 switch phase {
                 case .active:
-                    NSCursor.resizeLeftRight.push()
+                    if !isResizingSidebar && !isCursorPushed {
+                        NSCursor.resizeLeftRight.push()
+                        isCursorPushed = true
+                    }
                 case .ended:
-                    NSCursor.pop()
+                    if !isResizingSidebar && isCursorPushed {
+                        NSCursor.pop()
+                        isCursorPushed = false
+                    }
                 }
             }
             .gesture(
@@ -2136,10 +2143,14 @@ struct ContentView: View {
                             startingWidth = sidebarWidth
                         }
                         let newWidth = startingWidth + value.translation.width
-                        sidebarWidth = max(100, min(200, newWidth))
+                        sidebarWidth = max(100, min(400, newWidth))
                     }
                     .onEnded { _ in
                         isResizingSidebar = false
+                        if isCursorPushed {
+                            NSCursor.pop()
+                            isCursorPushed = false
+                        }
                     }
             )
 
