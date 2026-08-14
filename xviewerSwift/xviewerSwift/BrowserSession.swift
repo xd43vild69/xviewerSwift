@@ -738,7 +738,9 @@ func copySelectedItemToClipboard() {
         return (finalJpegURL, finalCR2URL)
     }
 
-    func moveFiles(urls: [URL], to destinationDir: URL) {
+    /// Mueve (por defecto) o copia archivos al directorio destino.
+    /// En modo copia los archivos de origen se conservan y la selección no cambia.
+    func moveFiles(urls: [URL], to destinationDir: URL, isCopy: Bool = false) {
         let operationID = UUID()
         fileOperation.cancellationToken = operationID
 
@@ -755,6 +757,7 @@ func copySelectedItemToClipboard() {
             defer { if destAccessed { destinationDir.stopAccessingSecurityScopedResource() } }
 
             var successfullyMoved: Set<URL> = []
+            var copiedDestinations: [URL] = []
             let fm = FileManager.default
 
             do {
@@ -768,13 +771,18 @@ func copySelectedItemToClipboard() {
 
                     if isJpeg {
                         do {
-                            _ = try self.moveOrCopyImagePair(jpegURL: sourceURL, to: destinationDir, isCopy: false)
-                            successfullyMoved.insert(sourceURL)
-                            if let cr2Source = self.findCompanionCR2(for: sourceURL) {
-                                successfullyMoved.insert(cr2Source)
+                            let (destJpeg, destCR2) = try self.moveOrCopyImagePair(jpegURL: sourceURL, to: destinationDir, isCopy: isCopy)
+                            if isCopy {
+                                copiedDestinations.append(destJpeg)
+                                if let destCR2 { copiedDestinations.append(destCR2) }
+                            } else {
+                                successfullyMoved.insert(sourceURL)
+                                if let cr2Source = self.findCompanionCR2(for: sourceURL) {
+                                    successfullyMoved.insert(cr2Source)
+                                }
                             }
                         } catch {
-                            print("Error moving JPEG pair \(fileName): \(error)")
+                            print("Error \(isCopy ? "copying" : "moving") JPEG pair \(fileName): \(error)")
                         }
                     } else {
                         let sourceAccessed = sourceURL.startAccessingSecurityScopedResource()
@@ -790,10 +798,15 @@ func copySelectedItemToClipboard() {
                         }
 
                         do {
-                            try fm.moveItem(at: sourceURL, to: finalURL)
-                            successfullyMoved.insert(sourceURL)
+                            if isCopy {
+                                try fm.copyItem(at: sourceURL, to: finalURL)
+                                copiedDestinations.append(finalURL)
+                            } else {
+                                try fm.moveItem(at: sourceURL, to: finalURL)
+                                successfullyMoved.insert(sourceURL)
+                            }
                         } catch {
-                            print("Error moving file \(fileName): \(error)")
+                            print("Error \(isCopy ? "copying" : "moving") file \(fileName): \(error)")
                         }
 
                         if sourceAccessed {
@@ -809,7 +822,17 @@ func copySelectedItemToClipboard() {
                     }
                 }
 
-                if !successfullyMoved.isEmpty {
+                if isCopy {
+                    // En copia el panel de origen no cambia: solo se registra el undo
+                    // (que borra las copias creadas en el destino).
+                    let destinations = copiedDestinations
+                    DispatchQueue.main.async { [weak self] in
+                        if !destinations.isEmpty {
+                            self?.recordOperation(.copy(destinations: destinations))
+                        }
+                        self?.fileOperation.reset()
+                    }
+                } else if !successfullyMoved.isEmpty {
                     DispatchQueue.main.async { [weak self] in
                         self?.recordOperation(.move(sources: Array(successfullyMoved), destination: destinationDir))
                     }

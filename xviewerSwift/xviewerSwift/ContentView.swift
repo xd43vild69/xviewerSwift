@@ -1560,25 +1560,25 @@ struct WorkspaceView: View {
 
     
     
-    private func moveSelectionToOtherPane(direction: ActivePane) {
+    private func moveSelectionToOtherPane(direction: ActivePane, isCopy: Bool = false) {
         guard isSplitViewEnabled else { return }
-        
+
         let sourceSession = (direction == .right) ? session : sessionRight
         let destSession = (direction == .right) ? sessionRight : session
-        
+
         guard let sourceFolder = sourceSession.currentFolderURL,
               let destFolder = destSession.currentFolderURL else { return }
-              
+
         if sourceFolder == destFolder {
-            sourceSession.showNotification("Cannot move: Source and destination are the same folder")
+            sourceSession.showNotification("Cannot \(isCopy ? "copy" : "move"): Source and destination are the same folder")
             return
         }
-        
+
         let urlsToMove = Array(sourceSession.selectedItemURLs)
         if urlsToMove.isEmpty { return }
-        
-        sourceSession.moveFiles(urls: urlsToMove, to: destFolder)
-        
+
+        sourceSession.moveFiles(urls: urlsToMove, to: destFolder, isCopy: isCopy)
+
         // Refresh destination panel
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             destSession.loadFolder(url: destFolder, sidebarManager: self.sidebarManager)
@@ -1650,6 +1650,18 @@ struct WorkspaceView: View {
                     }
                 }
                 let optionPressed = event.modifierFlags.contains(.option)
+
+                // ⌥←/⌥→ mueve la selección al otro panel; agregando ⌘ la copia.
+                // Se maneja aquí (y no con .keyboardShortcut) porque SwiftUI no
+                // intercepta de forma confiable flechas con varios modificadores.
+                if optionPressed, event.keyCode == 123 || event.keyCode == 124 {
+                    if isSplitViewEnabled {
+                        let direction: ActivePane = (event.keyCode == 124) ? .right : .left
+                        moveSelectionToOtherPane(direction: direction, isCopy: commandPressed)
+                    }
+                    return nil
+                }
+
                 if commandPressed && !optionPressed {
                     if shiftPressed {
                         if event.keyCode == 126 { // Up arrow
