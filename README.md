@@ -72,6 +72,64 @@ xviewerSwift is uniquely positioned at the intersection of a **lightning-fast im
 It is specifically designed for photographers, digital artists, and visual creators who need to cull and organize thousands of images (including RAW + JPEG pairs) rapidly using keyboard shortcuts, without the overhead of heavy asset managers like Adobe Bridge or Lightroom's Library module. 
 It competes with fast viewers like ApolloOne and FastRawViewer, but differentiates itself by offering robust, native dual-pane file management.
 
+## Keyboard Shortcuts
+
+### Grid/Browser View
+| Action | Shortcut |
+|--------|----------|
+| Select Folder | `Cmd + O` |
+| Split View Toggle | `Cmd + S` |
+| Select All Items | `Cmd + A` |
+| Select All (Items & Folders) | `Cmd + Control + A` |
+| Copy Item | `Cmd + C` |
+| Paste Item | `Cmd + V` |
+| Move Item | `Cmd + Option + V` or `Cmd + Shift + V` |
+| Delete Item | `Backspace` / `Delete` / `Cmd + Backspace` |
+| Undo Last Action | `Cmd + Z` |
+| Context Menu | `Cmd + /` |
+| Rename Item | `F2` |
+| Filter (Toggle) | `F3` |
+| Create New Folder | `Cmd + Shift + N` |
+| Mount SMB Server | `Cmd + K` |
+
+### Navigation
+| Action | Shortcut |
+|--------|----------|
+| Navigate Grid | `Arrow Keys` |
+| Multi-Select | `Shift + Arrow Keys` |
+| Open Selected Folder/Image | `Enter` / `Space` / `Cmd + Down` |
+| Navigate Up Folder | `Cmd + Up` |
+| Navigate Back | `Cmd + Left` (Grid view only) |
+| Navigate Forward | `Cmd + Right` (Grid view only) |
+| Jump to First Item | `Cmd + [` or `Cmd + Shift + Up` |
+| Jump to Last Item | `Cmd + ]` or `Cmd + Shift + Down` |
+| Jump to Item (by Letter) | `Letter Key (A-Z, 0-9)` |
+
+### Split View
+| Action | Shortcut |
+|--------|----------|
+| Toggle Split View | `Cmd + S` |
+| Switch Active Pane | `Tab` |
+| Move Selection to Left Pane | `Option + Left` |
+| Move Selection to Right Pane | `Option + Right` |
+
+### Full-Screen Image Viewer
+| Action | Shortcut |
+|--------|----------|
+| Close Viewer | `Esc` |
+| Toggle UI | `Tab` |
+| Previous/Next Image | `Arrow Keys` |
+| Copy to Favorites | `Cmd + M` |
+| Invert Colors | `Cmd + I` |
+| Black & White | `Cmd + B` |
+| Flip Horizontal | `Cmd + H` |
+| Rotate Left | `Cmd + Left` |
+| Rotate Right | `Cmd + Right` |
+| Reset Rotation | `Delete` |
+| Cycle Background Color | `Cmd + 1` |
+
+> **Tip:** Access all shortcuts anytime in **Settings > Shortcuts**.
+
 ## Requirements
 - macOS 13.0+ (Ventura) or later.
 - Xcode 15.0+ (for building and development).

@@ -121,50 +121,60 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Group {
                     Text("General & File Operations").font(.headline).foregroundColor(.secondary)
-                    ShortcutRow(action: "Close / Dismiss", key: "Esc")
                     ShortcutRow(action: "Select Folder", key: "Cmd + O")
-                    ShortcutRow(action: "Select All", key: "Cmd + A")
-                    ShortcutRow(action: "Delete Item", key: "Backspace")
-                    ShortcutRow(action: "Create New Folder", key: "Cmd + Shift + N")
-                    ShortcutRow(action: "Rename Item", key: "F2")
+                    ShortcutRow(action: "Select All Items", key: "Cmd + A")
+                    ShortcutRow(action: "Select All (Items & Folders)", key: "Cmd + Control + A")
                     ShortcutRow(action: "Copy Item", key: "Cmd + C")
                     ShortcutRow(action: "Paste Item", key: "Cmd + V")
+                    ShortcutRow(action: "Move Item", key: "Cmd + Shift + V / Cmd + Option + V")
+                    ShortcutRow(action: "Delete Item", key: "Backspace / Delete / Cmd + Backspace")
                     ShortcutRow(action: "Undo Last Action", key: "Cmd + Z")
+                    ShortcutRow(action: "Create New Folder", key: "Cmd + Shift + N")
+                    ShortcutRow(action: "Rename Item", key: "F2")
+                    ShortcutRow(action: "Filter (Toggle)", key: "F3")
+                    ShortcutRow(action: "Context Menu", key: "Cmd + /")
+                    ShortcutRow(action: "Mount SMB Server", key: "Cmd + K")
                 }
-                
-                Divider().padding(.vertical, 4)
-                
+
+                Divider().padding(.vertical, 8)
+
                 Group {
                     Text("Navigation").font(.headline).foregroundColor(.secondary)
-                    ShortcutRow(action: "Open Selected", key: "Enter / Space")
-                    ShortcutRow(action: "Navigate Items", key: "Arrow Keys")
-                    ShortcutRow(action: "Navigate Up", key: "Cmd + Up")
+                    ShortcutRow(action: "Navigate Grid", key: "Arrow Keys")
+                    ShortcutRow(action: "Multi-Select", key: "Shift + Arrow Keys")
+                    ShortcutRow(action: "Open Selected", key: "Enter / Space / Cmd + Down")
+                    ShortcutRow(action: "Navigate Up Folder", key: "Cmd + Up")
                     ShortcutRow(action: "Navigate Back", key: "Cmd + Left")
                     ShortcutRow(action: "Navigate Forward", key: "Cmd + Right")
-                    ShortcutRow(action: "Navigate to First", key: "Cmd + [ (or Cmd + Shift + Up)")
-                    ShortcutRow(action: "Navigate to Last", key: "Cmd + ] (or Cmd + Shift + Down)")
+                    ShortcutRow(action: "Jump to First Item", key: "Cmd + [ (or Cmd + Shift + Up)")
+                    ShortcutRow(action: "Jump to Last Item", key: "Cmd + ] (or Cmd + Shift + Down)")
+                    ShortcutRow(action: "Jump to Item by Letter", key: "Letter Key (A-Z, 0-9)")
                 }
-                
-                Divider().padding(.vertical, 4)
-                
+
+                Divider().padding(.vertical, 8)
+
                 Group {
                     Text("Split View").font(.headline).foregroundColor(.secondary)
                     ShortcutRow(action: "Toggle Split View", key: "Cmd + S")
                     ShortcutRow(action: "Switch Active Pane", key: "Tab")
-                    ShortcutRow(action: "Move to Other Pane", key: "Option + L/R Arrow")
+                    ShortcutRow(action: "Move to Left Pane", key: "Option + Left")
+                    ShortcutRow(action: "Move to Right Pane", key: "Option + Right")
                 }
-                
-                Divider().padding(.vertical, 4)
-                
+
+                Divider().padding(.vertical, 8)
+
                 Group {
-                    Text("Image Viewer").font(.headline).foregroundColor(.secondary)
-                    ShortcutRow(action: "Toggle Favorite", key: "Cmd + M")
-                    ShortcutRow(action: "Invert Image Colors", key: "Cmd + I")
-                    ShortcutRow(action: "Black & White Image", key: "Cmd + B")
-                    ShortcutRow(action: "Flip Image Horizontal", key: "Cmd + H")
-                    ShortcutRow(action: "Rotate Image Left", key: "Cmd + Left")
-                    ShortcutRow(action: "Rotate Image Right", key: "Cmd + Right")
-                    ShortcutRow(action: "Reset Image Rotation", key: "Delete")
+                    Text("Full-Screen Image Viewer").font(.headline).foregroundColor(.secondary)
+                    ShortcutRow(action: "Close Viewer", key: "Esc")
+                    ShortcutRow(action: "Toggle UI", key: "Tab")
+                    ShortcutRow(action: "Previous/Next Image", key: "Arrow Keys")
+                    ShortcutRow(action: "Copy to Favorites", key: "Cmd + M")
+                    ShortcutRow(action: "Invert Colors", key: "Cmd + I")
+                    ShortcutRow(action: "Black & White", key: "Cmd + B")
+                    ShortcutRow(action: "Flip Horizontal", key: "Cmd + H")
+                    ShortcutRow(action: "Rotate Left", key: "Cmd + Left")
+                    ShortcutRow(action: "Rotate Right", key: "Cmd + Right")
+                    ShortcutRow(action: "Reset Rotation", key: "Delete")
                     ShortcutRow(action: "Cycle Background Color", key: "Cmd + 1")
                 }
             }
