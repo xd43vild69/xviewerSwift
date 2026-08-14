@@ -942,13 +942,17 @@ func copySelectedItemToClipboard() {
             }
             
             loadFolder(url: currentDir, sidebarManager: nil)
-            
-            DispatchQueue.main.async {
+
+            // Delay (no solo async) para dejar que el tracking loop del menú contextual
+            // termine de cerrarse antes de mostrar el NSAlert modal; si no, el accessory
+            // textField del alert no queda enfocado (a diferencia del rename por F2,
+            // que no viene de un menú).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 self.selectedItemURLs = [finalURL]
                 self.activeItemURL = finalURL
                 self.promptSingleRename(for: finalURL)
             }
-            
+
         } catch {
             print("Error creating folder with selection: \(error)")
             NSSound.beep()
@@ -1106,17 +1110,31 @@ func copySelectedItemToClipboard() {
         let baseName = url.deletingPathExtension().lastPathComponent
         let alert = NSAlert()
         alert.messageText = "Rename File"
-        alert.informativeText = "Enter a new name (extension will be preserved):"
         alert.addButton(withTitle: "Rename")
         alert.addButton(withTitle: "Cancel")
-        
+
         let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
         textField.stringValue = baseName
         alert.accessoryView = textField
-        
+
         alert.layout()
         alert.window.initialFirstResponder = textField
-        
+        // Timer en modo .common: los bloques de DispatchQueue.main NO se ejecutan durante
+        // el run loop modal de NSAlert, pero los Timers en .common sí. Cuando el alert se
+        // abre desde un menú contextual, el foco inicial se pierde — este timer lo
+        // recupera ya con el modal corriendo, y se invalida en cuanto lo logra.
+        let focusTimer = Timer(timeInterval: 0.05, repeats: true) { [weak alert, weak textField] timer in
+            guard let alert, let textField, alert.window.isVisible else { return }
+            if alert.window.firstResponder === textField.currentEditor() {
+                timer.invalidate()
+                return
+            }
+            alert.window.makeFirstResponder(textField)
+            textField.selectText(nil)
+        }
+        RunLoop.main.add(focusTimer, forMode: .common)
+        defer { focusTimer.invalidate() }
+
         if alert.runModal() == .alertFirstButtonReturn {
             let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if !newName.isEmpty && newName != baseName {

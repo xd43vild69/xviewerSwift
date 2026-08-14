@@ -1,2 +1,89 @@
-xviewerSwift/build
-xviewerSwift/utilidades
+# ==========================================
+# GITIGNORE - Solo Código Fuente
+# ==========================================
+
+# --- Archivos de Sistema y Temporales ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+ehthumbs.db
+Thumbs.db
+
+# --- Carpetas de Compilación y Salida (Build) ---
+build/
+xviewerSwift/build/
+DerivedData/
+.build/
+bin/
+obj/
+
+# --- Configuraciones Locales y de Usuario (Xcode / IDEs) ---
+*.xcuserdatad/
+xcuserdata/
+*.xcremappingtools/
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# --- Binarios y Librerías (No requeridos en Git) ---
+*.app
+*.ipa
+*.pkg
+*.dmg
+*.o
+*.a
+*.la
+*.dylib
+*.framework
+*.lib
+*.dll
+*.so
+*.dSYM/
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+
+# --- Imágenes, Audio, Video y Multimedia ---
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.heic
+*.webp
+*.tiff
+*.bmp
+*.ico
+*.mp4
+*.mov
+*.avi
+*.mp3
+*.wav
+*.pdf
+
+# --- Bases de Datos y Logs ---
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.sql
+*.sqlitedb
+
+# --- Entornos Virtuales y Caché de Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env
+
+# --- Carpetas específicas de utilidades y pruebas locales del proyecto ---
+xviewerSwift/utilidades/

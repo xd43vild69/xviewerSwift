@@ -1174,7 +1174,7 @@ struct GridItemCell: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 50, height: 50)
-                    .foregroundColor(.blue)
+                    .foregroundColor(.gray)
             } else {
                 FileItemView(item: item)
             }
@@ -1437,16 +1437,43 @@ enum ActivePane {
     case right
 }
 
-struct ContentView: View {
-    @StateObject private var sidebarManager = SidebarManager()
+struct WorkspaceView: View {
+    @ObservedObject var tab: WorkspaceTab
+    @ObservedObject var sidebarManager: SidebarManager
+    @ObservedObject private var session: BrowserSession
+    @ObservedObject private var sessionRight: BrowserSession
+
+    init(tab: WorkspaceTab, sidebarManager: SidebarManager) {
+        self.tab = tab
+        self.sidebarManager = sidebarManager
+        self.session = tab.session
+        self.sessionRight = tab.sessionRight
+    }
+
     @State private var isShowingFolderPicker = false
     @State private var isShowingSettings = false
-    @State private var sidebarSelection: URL?
-    @State private var sidebarSelectionRight: URL?
-    @StateObject private var session = BrowserSession()
-    @StateObject private var sessionRight = BrowserSession()
-    @State private var isSplitViewEnabled = false
-    @State private var activePane: ActivePane = .left
+    private var sidebarSelection: URL? {
+        get { tab.sidebarSelection }
+        nonmutating set { tab.sidebarSelection = newValue }
+    }
+    private var sidebarSelectionBinding: Binding<URL?> {
+        Binding(get: { tab.sidebarSelection }, set: { tab.sidebarSelection = $0 })
+    }
+    private var sidebarSelectionRight: URL? {
+        get { tab.sidebarSelectionRight }
+        nonmutating set { tab.sidebarSelectionRight = newValue }
+    }
+    private var sidebarSelectionRightBinding: Binding<URL?> {
+        Binding(get: { tab.sidebarSelectionRight }, set: { tab.sidebarSelectionRight = $0 })
+    }
+    private var isSplitViewEnabled: Bool {
+        get { tab.isSplitViewEnabled }
+        nonmutating set { tab.isSplitViewEnabled = newValue }
+    }
+    private var activePane: ActivePane {
+        get { tab.activePane }
+        nonmutating set { tab.activePane = newValue }
+    }
     @State private var activeItemGlobalFrame: CGRect = .zero
     @State private var crossPaneCompareURLs: [URL]? = nil
     @State private var sidebarWidth: CGFloat = 160
@@ -1598,7 +1625,9 @@ struct ContentView: View {
                 
                 if commandPressed, let chars = event.charactersIgnoringModifiers?.lowercased() {
                     if chars == "v" {
-                        activeSession().pasteFromClipboard(move: shiftPressed)
+                        // ⌘⌥V (convención Finder) o ⌘⇧V mueven; ⌘V copia
+                        let movePressed = shiftPressed || event.modifierFlags.contains(.option)
+                        activeSession().pasteFromClipboard(move: movePressed)
                         // Force both panels to refresh
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             if let leftFolder = session.currentFolderURL {
@@ -2158,7 +2187,7 @@ struct ContentView: View {
                 HSplitView {
                     PaneBrowserView(
                         sidebarManager: sidebarManager,
-                        sidebarSelection: $sidebarSelection,
+                        sidebarSelection: sidebarSelectionBinding,
                         session: session,
                         otherPaneSelectedImageCount: sessionRight.selectedItemURLs.filter { url in
                             if let found = sessionRight.folderContents.first(where: { $0.url == url }) {
@@ -2185,7 +2214,7 @@ struct ContentView: View {
                     }
                     PaneBrowserView(
                         sidebarManager: sidebarManager,
-                        sidebarSelection: $sidebarSelectionRight,
+                        sidebarSelection: sidebarSelectionRightBinding,
                         session: sessionRight,
                         otherPaneSelectedImageCount: session.selectedItemURLs.filter { url in
                             if let found = session.folderContents.first(where: { $0.url == url }) {
@@ -2212,7 +2241,7 @@ struct ContentView: View {
                     }
                 }
             } else {
-                PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: $sidebarSelection, session: session)
+                PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: sidebarSelectionBinding, session: session)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .simultaneousGesture(TapGesture().onEnded {
                         activePane = .left
@@ -2360,12 +2389,6 @@ struct ContentView: View {
                 if frame != .zero { activeItemGlobalFrame = frame }
             }
             .preferredColorScheme(.dark)
-            .onOpenURL { url in
-                sidebarSelection = url.deletingLastPathComponent()
-                session.activeItemURL = url
-                session.selectedItemURLs = [url]
-                session.fullScreenImageURL = url
-            }
             .sheet(isPresented: $session.isShowingProperties) {
                 if let url = session.propertiesURL { PropertiesView(url: url) }
             }
@@ -2505,19 +2528,108 @@ struct ContentView: View {
                 setupKeyboardMonitor()
                 session.sidebarManager = sidebarManager
                 sessionRight.sidebarManager = sidebarManager
-                if session.currentFolderURL == nil {
+                // Solo asignar defaults si el tab no trae ya una selección
+                // (p.ej. restaurada desde la sesión anterior o abierta desde Finder).
+                if session.currentFolderURL == nil && sidebarSelection == nil {
                     sidebarSelection = session.restoreBookmark() ?? FileManager.default.homeDirectoryForCurrentUser
+                } else if session.currentFolderURL == nil, let url = sidebarSelection {
+                    // onChange no dispara con el valor inicial: cargar explícitamente
+                    // la carpeta de un tab restaurado la primera vez que se monta.
+                    session.loadFolder(url: url, sidebarManager: sidebarManager)
                 }
-                if sessionRight.currentFolderURL == nil {
+                if sessionRight.currentFolderURL == nil && sidebarSelectionRight == nil {
                     sidebarSelectionRight = sessionRight.restoreBookmark() ?? FileManager.default.homeDirectoryForCurrentUser
+                } else if sessionRight.currentFolderURL == nil, isSplitViewEnabled, let url = sidebarSelectionRight {
+                    sessionRight.loadFolder(url: url, sidebarManager: sidebarManager)
                 }
                 updateWindowTitle()
             }
-
+            .onDisappear {
+                if let monitor = eventMonitor {
+                    NSEvent.removeMonitor(monitor)
+                    eventMonitor = nil
+                }
+                ImmersiveWindowController.shared.hide()
+            }
             .onChange(of: activeSession().currentFolderURL) { _, _ in updateWindowTitle() }
     }
-    
+
     }
+
+// MARK: - Root container (tabs)
+
+struct ContentView: View {
+    /// Límite de tabs. Cada tab mantiene vivas 2 BrowserSession (listas de archivos,
+    /// historial de navegación) pero solo el tab activo monta vista y genera thumbnails
+    /// (cache compartido global). En un MacBook Pro M4, 10 tabs es un techo holgado
+    /// que evita acumular listas de carpetas enormes sin restringir el uso normal.
+    static let maxTabs = 10
+
+    @StateObject private var sidebarManager = SidebarManager()
+    @State private var tabs: [WorkspaceTab]
+    @State private var activeTabID: WorkspaceTab.ID
+
+    init() {
+        if let restored = TabSessionStore.restore() {
+            _tabs = State(initialValue: restored.tabs)
+            _activeTabID = State(initialValue: restored.activeTabID)
+        } else {
+            let firstTab = WorkspaceTab()
+            _tabs = State(initialValue: [firstTab])
+            _activeTabID = State(initialValue: firstTab.id)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TabBarView(tabs: $tabs, activeTabID: $activeTabID, maxTabs: Self.maxTabs)
+            if let tab = tabs.first(where: { $0.id == activeTabID }) {
+                WorkspaceView(tab: tab, sidebarManager: sidebarManager)
+                    .id(tab.id)
+            }
+        }
+        .onChange(of: activeTabID) { _, _ in
+            ImmersiveWindowController.shared.hide()
+            saveSession()
+        }
+        .onChange(of: tabs.count) { _, _ in
+            saveSession()
+        }
+        .onOpenURL { url in
+            openFromExternal(url)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            saveSession()
+        }
+    }
+
+    private func saveSession() {
+        TabSessionStore.save(tabs: tabs, activeTabID: activeTabID)
+    }
+
+    /// Imagen abierta desde fuera (Finder, "Open With"): se abre en un tab nuevo
+    /// para no pisar la navegación de los tabs existentes. Si se alcanzó el límite,
+    /// se recicla el tab más antiguo que no esté activo.
+    private func openFromExternal(_ url: URL) {
+        let tab: WorkspaceTab
+        if tabs.count >= Self.maxTabs {
+            if let recycled = tabs.first(where: { $0.id != activeTabID }) ?? tabs.first {
+                tab = recycled
+            } else {
+                return
+            }
+        } else {
+            tab = WorkspaceTab()
+            tabs.append(tab)
+        }
+        tab.sidebarSelection = url.deletingLastPathComponent()
+        tab.session.activeItemURL = url
+        tab.session.selectedItemURLs = [url]
+        tab.session.fullScreenImageURL = url
+        activeTabID = tab.id
+        saveSession()
+    }
+}
 
 #Preview {
     ContentView()
