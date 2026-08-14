@@ -159,6 +159,9 @@ struct SettingsView: View {
                     ShortcutRow(action: "Switch Active Pane", key: "Tab")
                     ShortcutRow(action: "Move to Left Pane", key: "Option + Left")
                     ShortcutRow(action: "Move to Right Pane", key: "Option + Right")
+                    ShortcutRow(action: "Copy to Left Pane", key: "Cmd + Option + Left")
+                    ShortcutRow(action: "Copy to Right Pane", key: "Cmd + Option + Right")
+                    ShortcutRow(action: "Select Tabs for Split Merge", key: "Cmd + Click (2 tabs), then \"Split\"")
                 }
 
                 Divider().padding(.vertical, 8)

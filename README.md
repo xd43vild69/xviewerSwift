@@ -112,6 +112,9 @@ It competes with fast viewers like ApolloOne and FastRawViewer, but differentiat
 | Switch Active Pane | `Tab` |
 | Move Selection to Left Pane | `Option + Left` |
 | Move Selection to Right Pane | `Option + Right` |
+| Copy Selection to Left Pane | `Cmd + Option + Left` |
+| Copy Selection to Right Pane | `Cmd + Option + Right` |
+| Select Tabs for Split Merge | `Cmd + Click` on 2 tabs, then "Split" |
 
 ### Full-Screen Image Viewer
 | Action | Shortcut |
