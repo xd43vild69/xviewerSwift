@@ -14,7 +14,7 @@ enum CropAspect: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .free: return "Libre"
+        case .free: return "Free"
         case .original: return "Original"
         case .square: return "1:1"
         case .fourThree: return "4:3"
@@ -256,12 +256,12 @@ struct CropEditorView: View {
                     Color.black.opacity(0.55).ignoresSafeArea()
                     VStack(spacing: 12) {
                         ProgressView().controlSize(.large)
-                        Text("Guardando…").foregroundColor(.white)
+                        Text("Saving…").foregroundColor(.white)
                     }
                 }
             }
         }
-        .alert("No se pudo recortar", isPresented: Binding(
+        .alert("Could not crop", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )) {
@@ -359,7 +359,7 @@ struct CropEditorView: View {
     private var controlBar: some View {
         HStack(spacing: 14) {
             Button { rotate(clockwise: false) } label: { Image(systemName: "rotate.left") }
-                .help("Rotar 90° a la izquierda (⌘←)")
+                .help("Rotate 90° left (⌘←)")
 
             HStack(spacing: 8) {
                 Slider(value: Binding(
@@ -373,7 +373,7 @@ struct CropEditorView: View {
             }
 
             Button { rotate(clockwise: true) } label: { Image(systemName: "rotate.right") }
-                .help("Rotar 90° a la derecha (⌘→)")
+                .help("Rotate 90° right (⌘→)")
 
             Divider().frame(height: 22)
 
@@ -395,9 +395,9 @@ struct CropEditorView: View {
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundColor(.white.opacity(0.85))
 
-            Button("Restablecer") { resetAll() }
-            Button("Cancelar") { onCancel() }
-            Button("Aplicar") { commit() }
+            Button("Reset") { resetAll() }
+            Button("Cancel") { onCancel() }
+            Button("Apply") { commit() }
                 .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, 20)

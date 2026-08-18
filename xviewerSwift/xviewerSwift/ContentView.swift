@@ -757,7 +757,7 @@ struct FullScreenImageView: View {
 
     private func enterCropMode() {
         guard gifFrames == nil else {
-            showNotification("⚠️ Los GIF animados no se pueden recortar")
+            showNotification("⚠️ Animated GIFs cannot be cropped")
             NSSound.beep()
             return
         }
@@ -778,7 +778,7 @@ struct FullScreenImageView: View {
         nsImage = nil
         loadImage(from: url)
         onImageEdited?(url, backup)
-        showNotification("✅ Imagen recortada")
+        showNotification("✅ Image cropped")
     }
 
     private func stopGIFAnimation() {

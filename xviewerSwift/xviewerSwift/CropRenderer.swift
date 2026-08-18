@@ -13,13 +13,13 @@ enum CropRenderError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .cannotReadImage:
-            return "No se pudo leer la imagen original a resolución completa."
+            return "Could not read the original image at full resolution."
         case .unsupportedForWriting(let ext):
-            return "macOS no puede escribir archivos .\(ext); el recorte no se guardó."
+            return "macOS cannot write .\(ext) files; the crop was not saved."
         case .renderFailed:
-            return "No se pudo generar la imagen recortada."
+            return "Could not render the cropped image."
         case .writeFailed(let reason):
-            return "No se pudo escribir el archivo: \(reason)"
+            return "Could not write the file: \(reason)"
         }
     }
 }
@@ -166,7 +166,7 @@ enum CropRenderer {
         do {
             try FileManager.default.copyItem(at: url, to: destination)
         } catch {
-            throw CropRenderError.writeFailed("no se pudo respaldar el original (\(error.localizedDescription))")
+            throw CropRenderError.writeFailed("could not back up the original (\(error.localizedDescription))")
         }
         return destination
     }
