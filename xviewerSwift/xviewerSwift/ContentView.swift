@@ -36,6 +36,8 @@ struct FileItem: Identifiable, Hashable {
     let name: String
     let isDirectory: Bool
     let creationDate: Date
+    /// Fecha de modificación real: es lo que invalida la miniatura cuando el archivo cambia en disco.
+    let modificationDate: Date
     let fileSize: Int64
     let isLocal: Bool
 
@@ -121,6 +123,11 @@ class ThumbnailCache {
         cache.setObject(image, forKey: url as NSURL, cost: cost)
     }
 
+    /// Invalida la entrada de un archivo que acaba de cambiar en disco (la key es sólo la URL).
+    func remove(for url: URL) {
+        cache.removeObject(forKey: url as NSURL)
+    }
+
     func clear() {
         cache.removeAllObjects()
     }
@@ -137,7 +144,7 @@ extension ThumbnailCache {
 
         let diskImg = await Task.detached(priority: .userInitiated) { () -> NSImage? in
             guard !Task.isCancelled else { return nil }
-            return ThumbnailDiskCache.shared.get(for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
+            return ThumbnailDiskCache.shared.get(for: url, modificationDate: item.modificationDate, fileSize: item.fileSize)
         }.value
 
         if let img = diskImg {
@@ -172,7 +179,7 @@ extension ThumbnailCache {
                 guard !Task.isCancelled, let img else { return nil }
                 ThumbnailCache.shared.set(img, for: url)
                 Task.detached(priority: .background) {
-                    ThumbnailDiskCache.shared.set(img, for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
+                    ThumbnailDiskCache.shared.set(img, for: url, modificationDate: item.modificationDate, fileSize: item.fileSize)
                 }
                 return img
             } else {
@@ -198,7 +205,7 @@ extension ThumbnailCache {
                 if let img = embedded {
                     ThumbnailCache.shared.set(img, for: url)
                     Task.detached(priority: .background) {
-                        ThumbnailDiskCache.shared.set(img, for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
+                        ThumbnailDiskCache.shared.set(img, for: url, modificationDate: item.modificationDate, fileSize: item.fileSize)
                     }
                     return img
                 }
@@ -214,7 +221,7 @@ extension ThumbnailCache {
                 let img = representation.nsImage
                 ThumbnailCache.shared.set(img, for: url)
                 Task.detached(priority: .background) {
-                    ThumbnailDiskCache.shared.set(img, for: url, modificationDate: item.creationDate, fileSize: item.fileSize)
+                    ThumbnailDiskCache.shared.set(img, for: url, modificationDate: item.modificationDate, fileSize: item.fileSize)
                 }
                 return img
             }
@@ -260,15 +267,35 @@ class GIFAnimator {
     }
 }
 
+/// Identidad del contenido de un archivo (no de su ruta).
+struct FileVersion: Equatable {
+    let modificationDate: Date
+    let fileSize: Int64
+}
+
 struct FileItemView: View {
     let item: FileItem
     @State private var thumbnail: NSImage?
+    /// Versión del archivo que corresponde a `thumbnail`.
+    @State private var loadedVersion: FileVersion?
     @Environment(\.isScrolling) private var isScrolling
     @Environment(\.thumbnailLoader) private var thumbnailLoader
 
     private struct TaskID: Equatable {
         let url: URL
         let isScrolling: Bool
+        /// Identifica la *versión* del archivo: si cambia en disco, hay que regenerar la miniatura.
+        let modificationDate: Date
+        let fileSize: Int64
+
+        var fileVersion: FileVersion {
+            FileVersion(modificationDate: modificationDate, fileSize: fileSize)
+        }
+    }
+
+    private var taskID: TaskID {
+        TaskID(url: item.url, isScrolling: isScrolling,
+               modificationDate: item.modificationDate, fileSize: item.fileSize)
     }
 
     var body: some View {
@@ -301,11 +328,17 @@ struct FileItemView: View {
                     }
                 }
                 .cornerRadius(8)
-                .task(id: TaskID(url: item.url, isScrolling: isScrolling)) {
-                    guard !isScrolling else { return }
-                    await loadThumbnail()
-                }
             }
+        }
+        .task(id: taskID) {
+            guard item.isImage else { return }
+            // El archivo cambió en disco (p. ej. un recorte): descarta la miniatura vieja.
+            if let loaded = loadedVersion, loaded != taskID.fileVersion {
+                thumbnail = nil
+            }
+            guard !isScrolling, thumbnail == nil else { return }
+            await loadThumbnail()
+            loadedVersion = taskID.fileVersion
         }
     }
     
@@ -328,7 +361,7 @@ struct FileItemView: View {
             let icon = NSWorkspace.shared.icon(forFileType: item.url.pathExtension)
             ThumbnailCache.shared.set(icon, for: item.url)
             Task.detached(priority: .background) {
-                ThumbnailDiskCache.shared.set(icon, for: item.url, modificationDate: item.creationDate, fileSize: item.fileSize)
+                ThumbnailDiskCache.shared.set(icon, for: item.url, modificationDate: item.modificationDate, fileSize: item.fileSize)
             }
             self.thumbnail = icon
         }
@@ -354,7 +387,8 @@ class ImmersiveWindowController {
             return
         }
         
-        let screenRect = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        let targetScreen = NSApp.keyWindow?.screen ?? NSScreen.main
+        let screenRect = targetScreen?.frame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
         
         let newWindow = ImmersiveWindow(
             contentRect: screenRect,
@@ -362,12 +396,13 @@ class ImmersiveWindowController {
             backing: .buffered,
             defer: false
         )
-        newWindow.level = .screenSaver
+        // .normal so Cmd+Tab lets other apps draw over the image instead of it covering everything
+        newWindow.level = .normal
         newWindow.backgroundColor = .black
         newWindow.isOpaque = true
         newWindow.hasShadow = false
         newWindow.isReleasedWhenClosed = false
-        newWindow.collectionBehavior = [.fullScreenPrimary, .canJoinAllSpaces]
+        newWindow.collectionBehavior = [.fullScreenPrimary, .managed]
         
         newWindow.contentView = NSHostingView(rootView: content())
         
@@ -391,10 +426,12 @@ class ZoomState: ObservableObject {
     
     private var scrollMonitor: Any?
     private var keyMonitor: Any?
+    /// Se desactiva mientras el editor de recorte está abierto (sus monitors son globales a la app).
+    var monitorsEnabled = true
     
     init() {
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            guard let self = self else { return event }
+            guard let self = self, self.monitorsEnabled else { return event }
             if self.totalZoom > 1.0 {
                 DispatchQueue.main.async {
                     self.totalOffset.width += event.scrollingDeltaX
@@ -406,7 +443,7 @@ class ZoomState: ObservableObject {
         }
         
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self = self else { return event }
+            guard let self = self, self.monitorsEnabled else { return event }
             let isCommandOnly = event.modifierFlags.contains(.command) && !event.modifierFlags.contains(.shift) && !event.modifierFlags.contains(.option) && !event.modifierFlags.contains(.control)
             if isCommandOnly {
                 if event.keyCode == 123 { // Left arrow
@@ -445,6 +482,8 @@ struct FullScreenImageView: View {
     let url: URL
     let onClose: () -> Void
     let navigateImage: (Int) -> Void
+    /// Se llama tras sobrescribir el archivo con un recorte: (archivo editado, backup del original).
+    var onImageEdited: ((URL, URL) -> Void)? = nil
 
     @State private var nsImage: NSImage?
     @State private var gifFrames: [GIFFrame]?
@@ -457,6 +496,7 @@ struct FullScreenImageView: View {
     @State private var showUI: Bool = true
     @State private var notificationMessage: String? = nil
     @State private var backgroundColorIndex: Int = 0
+    @State private var isCropping: Bool = false
 
     private let backgroundColors: [Color] = [
         Color.black,           // 100% black
@@ -467,6 +507,38 @@ struct FullScreenImageView: View {
     ]
     
     var body: some View {
+        Group {
+            if isCropping, let image = nsImage {
+                CropEditorView(url: url,
+                               previewImage: image,
+                               flipH: isFlippedHorizontal,
+                               onCancel: { exitCropMode() },
+                               onCommit: { backup in finishCrop(backup: backup) })
+            } else {
+                viewerBody
+            }
+        }
+        .zIndex(1)
+        .onAppear {
+            loadImage(from: url)
+        }
+        .onChange(of: url) { oldURL, newURL in
+            isCropping = false
+            zoomState.monitorsEnabled = true
+            stopGIFAnimation()
+            nsImage = nil
+            gifFrames = nil
+            currentFrameIndex = 0
+            zoomState.reset()
+            loadImage(from: newURL)
+        }
+        .onDisappear {
+            zoomState.monitorsEnabled = true
+            stopGIFAnimation()
+        }
+    }
+
+    private var viewerBody: some View {
         ZStack {
             backgroundColors[backgroundColorIndex]
                 .ignoresSafeArea()
@@ -657,6 +729,10 @@ struct FullScreenImageView: View {
                 .keyboardShortcut("1", modifiers: [.command])
                 .opacity(0)
 
+            Button(action: { enterCropMode() }) { Text("") }
+                .keyboardShortcut("c", modifiers: [])
+                .opacity(0)
+
             if let message = notificationMessage {
                 VStack {
                     Spacer()
@@ -675,21 +751,34 @@ struct FullScreenImageView: View {
                 }
             }
         }
-        .zIndex(1)
-        .onAppear {
-            loadImage(from: url)
+    }
+
+    // MARK: - Modo recorte
+
+    private func enterCropMode() {
+        guard gifFrames == nil else {
+            showNotification("⚠️ Los GIF animados no se pueden recortar")
+            NSSound.beep()
+            return
         }
-        .onChange(of: url) { oldURL, newURL in
-            stopGIFAnimation()
-            nsImage = nil
-            gifFrames = nil
-            currentFrameIndex = 0
-            zoomState.reset()
-            loadImage(from: newURL)
-        }
-        .onDisappear {
-            stopGIFAnimation()
-        }
+        guard nsImage != nil else { return }
+        zoomState.reset()
+        zoomState.monitorsEnabled = false
+        isCropping = true
+    }
+
+    private func exitCropMode() {
+        isCropping = false
+        zoomState.monitorsEnabled = true
+    }
+
+    private func finishCrop(backup: URL) {
+        exitCropMode()
+        ThumbnailCache.shared.remove(for: url)
+        nsImage = nil
+        loadImage(from: url)
+        onImageEdited?(url, backup)
+        showNotification("✅ Imagen recortada")
     }
 
     private func stopGIFAnimation() {
@@ -2292,7 +2381,10 @@ struct WorkspaceView: View {
                 if let url = newURL {
                     ImmersiveWindowController.shared.show {
                         FullScreenImageView(url: url, onClose: { session.fullScreenImageURL = nil },
-                                            navigateImage: { session.navigateFullScreen(direction: $0) })
+                                            navigateImage: { session.navigateFullScreen(direction: $0) },
+                                            onImageEdited: { edited, backup in
+                                                session.recordImageEdit(target: edited, backup: backup)
+                                            })
                     }
                 } else { ImmersiveWindowController.shared.hide() }
             }
@@ -2309,7 +2401,10 @@ struct WorkspaceView: View {
                 if let url = newURL {
                     ImmersiveWindowController.shared.show {
                         FullScreenImageView(url: url, onClose: { sessionRight.fullScreenImageURL = nil },
-                                            navigateImage: { sessionRight.navigateFullScreen(direction: $0) })
+                                            navigateImage: { sessionRight.navigateFullScreen(direction: $0) },
+                                            onImageEdited: { edited, backup in
+                                                sessionRight.recordImageEdit(target: edited, backup: backup)
+                                            })
                     }
                 } else if session.fullScreenImageURL == nil { ImmersiveWindowController.shared.hide() }
             }

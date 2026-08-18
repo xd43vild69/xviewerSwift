@@ -179,6 +179,21 @@ struct SettingsView: View {
                     ShortcutRow(action: "Rotate Right", key: "Cmd + Right")
                     ShortcutRow(action: "Reset Rotation", key: "Delete")
                     ShortcutRow(action: "Cycle Background Color", key: "Cmd + 1")
+                    ShortcutRow(action: "Crop & Straighten", key: "C")
+                }
+
+                Divider().padding(.vertical, 8)
+
+                Group {
+                    Text("Crop Editor (press C in the viewer)").font(.headline).foregroundColor(.secondary)
+                    ShortcutRow(action: "Apply (overwrites the original)", key: "Enter")
+                    ShortcutRow(action: "Cancel", key: "Esc")
+                    ShortcutRow(action: "Fine Rotation ±0.1°", key: "Left / Right")
+                    ShortcutRow(action: "Fine Rotation ±1°", key: "Shift + Left / Right")
+                    ShortcutRow(action: "Rotate 90°", key: "Cmd + Left / Cmd + Right")
+                    ShortcutRow(action: "Reset Crop & Rotation", key: "R")
+                    ShortcutRow(action: "Aspect Ratio Presets", key: "1…6 (Free, Original, 1:1, 4:3, 16:9, 3:2)")
+                    ShortcutRow(action: "Undo the Edit (grid view)", key: "Cmd + Z")
                 }
             }
             .padding()

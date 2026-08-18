@@ -95,6 +95,7 @@ enum FileOperationType {
     case rename(source: URL, oldName: String)
     case createFolder(folderURL: URL)
     case delete(source: URL)
+    case overwrite(target: URL, backup: URL)
 }
 
 struct UndoableAction {
@@ -112,6 +113,7 @@ struct UndoableAction {
         case .rename(_, let oldName): return "Renamed '\(oldName)'"
         case .createFolder(let url): return "Created '\(url.lastPathComponent)'"
         case .delete(let source): return "Deleted '\(source.lastPathComponent)'"
+        case .overwrite(let target, _): return "Edited '\(target.lastPathComponent)'"
         }
     }
 }
@@ -1642,7 +1644,7 @@ func copySelectedItemToClipboard() {
         loadTask = Task.detached(priority: .userInitiated) { [weak self, isLocalFolder, showAllFilesLocal] in
             guard let self else { return }
 
-            let keys: [URLResourceKey] = [.isDirectoryKey, .creationDateKey, .fileSizeKey, .volumeIsLocalKey]
+            let keys: [URLResourceKey] = [.isDirectoryKey, .creationDateKey, .contentModificationDateKey, .fileSizeKey, .volumeIsLocalKey]
             let timeoutSeconds = isLocalFolder ? 5.0 : 30.0
 
             let fileURLs: [URL]?
@@ -1683,12 +1685,14 @@ func copySelectedItemToClipboard() {
 
                 var isDirectory = false
                 var fileDate = Date.distantPast
+                var modDate = Date.distantPast
                 var fileSize: Int64 = 0
                 var isLocal = true
 
                 if let resourceValues = try? fileURL.resourceValues(forKeys: Set(keys)) {
                     isDirectory = resourceValues.isDirectory ?? false
                     fileDate = resourceValues.creationDate ?? Date.distantPast
+                    modDate = resourceValues.contentModificationDate ?? fileDate
                     fileSize = Int64(resourceValues.fileSize ?? 0)
                     isLocal = resourceValues.volumeIsLocal ?? true
                 }
@@ -1698,16 +1702,16 @@ func copySelectedItemToClipboard() {
                 if !isDirectory {
                     let ext = fileURL.pathExtension.lowercased()
                     if imageExtensions.contains(ext) {
-                        batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
+                        batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, modificationDate: modDate, fileSize: fileSize, isLocal: isLocal))
                     } else {
                         if showAllFilesLocal {
-                            batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
+                            batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, modificationDate: modDate, fileSize: fileSize, isLocal: isLocal))
                         } else {
                             otherCountLocal += 1
                         }
                     }
                 } else {
-                    batch.append(FileItem(url: fileURL, name: fileName, isDirectory: true, creationDate: fileDate, fileSize: fileSize, isLocal: isLocal))
+                    batch.append(FileItem(url: fileURL, name: fileName, isDirectory: true, creationDate: fileDate, modificationDate: modDate, fileSize: fileSize, isLocal: isLocal))
                 }
 
                 if batch.count >= 100 {
@@ -1964,6 +1968,15 @@ func copySelectedItemToClipboard() {
 
     // MARK: - Undo/Redo Operations
 
+    /// Registra una edición destructiva (recorte) para poder deshacerla, y refresca la carpeta.
+    func recordImageEdit(target: URL, backup: URL) {
+        recordOperation(.overwrite(target: target, backup: backup))
+        ThumbnailCache.shared.remove(for: target)
+        if let currentFolder = currentFolderURL {
+            loadFolder(url: currentFolder, sidebarManager: nil)
+        }
+    }
+
     private func recordOperation(_ operation: FileOperationType) {
         undoHistory.append(UndoableAction(operation: operation, timestamp: Date()))
         canUndo = !undoHistory.isEmpty
@@ -2110,6 +2123,29 @@ func copySelectedItemToClipboard() {
             case .delete:
                 DispatchQueue.main.async {
                     self?.showNotification("⚠️ Item deleted to Trash. Restore manually from Trash.")
+                }
+
+            case .overwrite(let target, let backup):
+                let folder = target.deletingLastPathComponent()
+                let fileAccessed = target.startAccessingSecurityScopedResource()
+                let folderAccessed = folder.startAccessingSecurityScopedResource()
+                defer {
+                    if fileAccessed { target.stopAccessingSecurityScopedResource() }
+                    if folderAccessed { folder.stopAccessingSecurityScopedResource() }
+                }
+                do {
+                    _ = try FileManager.default.replaceItemAt(target, withItemAt: backup)
+                    DispatchQueue.main.async {
+                        ThumbnailCache.shared.remove(for: target)
+                        self?.showNotification("✅ Undo: Restored '\(target.lastPathComponent)'")
+                        if let currentFolder = self?.currentFolderURL {
+                            self?.loadFolder(url: currentFolder, sidebarManager: nil)
+                        }
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self?.showNotification("❌ Could not restore original")
+                    }
                 }
             }
         }

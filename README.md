@@ -130,6 +130,21 @@ It competes with fast viewers like ApolloOne and FastRawViewer, but differentiat
 | Rotate Right | `Cmd + Right` |
 | Reset Rotation | `Delete` |
 | Cycle Background Color | `Cmd + 1` |
+| Crop & Straighten | `C` |
+
+### Crop Editor (press `C` in the full-screen viewer)
+Drag the 8 handles to set the crop, use the slider (or the arrow keys) to straighten the image, and press `Enter` to **overwrite the original**. The original is backed up automatically, so `Cmd + Z` in the grid restores it. Animated GIFs are not supported.
+
+| Action | Shortcut |
+|--------|----------|
+| Apply (overwrites the original) | `Enter` |
+| Cancel | `Esc` |
+| Fine Rotation ±0.1° | `Left` / `Right` |
+| Fine Rotation ±1° | `Shift + Left` / `Right` |
+| Rotate 90° | `Cmd + Left` / `Cmd + Right` |
+| Reset Crop & Rotation | `R` |
+| Aspect Ratio Presets | `1`…`6` (Free, Original, 1:1, 4:3, 16:9, 3:2) |
+| Undo the Edit (from the grid) | `Cmd + Z` |
 
 > **Tip:** Access all shortcuts anytime in **Settings > Shortcuts**.
 
