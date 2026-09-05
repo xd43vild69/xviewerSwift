@@ -2018,6 +2018,33 @@ struct WorkspaceView: View {
         }
     }
 
+    private func swapSplitPanes() {
+        guard isSplitViewEnabled else { return }
+        withAnimation {
+            // Intercambiar selecciones del sidebar
+            let tempSelection = sidebarSelection
+            sidebarSelection = sidebarSelectionRight
+            sidebarSelectionRight = tempSelection
+
+            // Intercambiar estado completo de las sesiones
+            session.swapState(with: sessionRight)
+
+            // Ajustar el panel activo para que siga enfocado en el contenido
+            if activePane == .right {
+                activePane = .left
+            } else {
+                activePane = .right
+            }
+
+            // Persistir la nueva carpeta de la izquierda como la principal
+            if let newPrimary = session.currentFolderURL {
+                session.saveBookmark(for: newPrimary)
+            }
+            tab.objectWillChange.send()
+            updateWindowTitle()
+        }
+    }
+
     private var shortcutsGroup: some View {
         Group {
             Button(action: {
@@ -2618,6 +2645,13 @@ struct WorkspaceView: View {
                         Label("Split View", systemImage: isSplitViewEnabled ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
                     }
                     .keyboardShortcut("s", modifiers: [.command])
+                    Button {
+                        swapSplitPanes()
+                    } label: {
+                        Label("Swap Panes", systemImage: "arrow.left.arrow.right")
+                    }
+                    .disabled(!isSplitViewEnabled)
+                    .help("Swap Left and Right Panes")
                     Button { isShowingFolderPicker = true } label: {
                         Label("Select Folder", systemImage: "folder.badge.plus")
                     }

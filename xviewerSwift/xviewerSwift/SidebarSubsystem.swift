@@ -239,7 +239,12 @@ class SidebarManager: ObservableObject {
     private func saveState() {
         saveItems(bookmarks, forKey: bookmarksKey)
         saveItems(network, forKey: networkKey)
-        saveItems(recent, forKey: recentKey)
+        // Solo persistir la última ruta visitada para la siguiente sesión
+        if let lastVisited = recent.max(by: { $0.lastVisitDate < $1.lastVisitDate }) {
+            saveItems([lastVisited], forKey: recentKey)
+        } else {
+            saveItems([], forKey: recentKey)
+        }
     }
 
     private func loadState() {
@@ -247,14 +252,11 @@ class SidebarManager: ObservableObject {
         network = loadItems(forKey: networkKey)
 
         let loadedRecent = loadItems(forKey: recentKey)
-        recent = loadedRecent.map { item in
+        // Al iniciar la aplicación solo se conserva la última ruta visitada
+        recent = Array(loadedRecent.prefix(1)).map { item in
             var modifiedItem = item
-            // Reseteo suave por sesión: el conteo arranca en 1 para que el histórico
-            // no domine. Se conserva lastVisitDate → las últimas rutas siguen visibles
-            // por recencia. A medida que el usuario trabaja en esta sesión, las visitas
-            // vuelven a contar y suben por encima del histórico.
             modifiedItem.visitCount = 1
-            modifiedItem.isCurrentSessionVisit = false
+            modifiedItem.isCurrentSessionVisit = true
             return modifiedItem
         }
     }

@@ -226,7 +226,54 @@ class BrowserSession: ObservableObject {
         navigationIndex >= 0 && navigationIndex < navigationHistory.count - 1
     }
 
-func copySelectedItemToClipboard() {
+    func swapState(with other: BrowserSession) {
+        loadTask?.cancel()
+        metadataTask?.cancel()
+        preloadTask?.cancel()
+        other.loadTask?.cancel()
+        other.metadataTask?.cancel()
+        other.preloadTask?.cancel()
+
+        swap(&self.currentColumnCount, &other.currentColumnCount)
+        swap(&self.currentFolderURL, &other.currentFolderURL)
+        swap(&self.folderContents, &other.folderContents)
+        swap(&self.allFolderContents, &other.allFolderContents)
+        swap(&self.fullScreenImageURL, &other.fullScreenImageURL)
+        swap(&self.selectedItemURLs, &other.selectedItemURLs)
+        swap(&self.activeItemURL, &other.activeItemURL)
+        swap(&self.currentSortOrder, &other.currentSortOrder)
+        swap(&self.metadataString, &other.metadataString)
+        swap(&self.otherFileCount, &other.otherFileCount)
+        swap(&self.isScrolling, &other.isScrolling)
+        swap(&self.showAllFiles, &other.showAllFiles)
+        swap(&self.filterText, &other.filterText)
+        swap(&self.isFilterBarPresented, &other.isFilterBarPresented)
+        swap(&self.selectionAnchorURL, &other.selectionAnchorURL)
+        swap(&self.selectionAnchorIndex, &other.selectionAnchorIndex)
+        swap(&self.selectionBaseURLs, &other.selectionBaseURLs)
+        swap(&self.thumbnailLoader, &other.thumbnailLoader)
+        swap(&self.isShowingProperties, &other.isShowingProperties)
+        swap(&self.propertiesURL, &other.propertiesURL)
+        swap(&self.isShowingSingleRenameAlert, &other.isShowingSingleRenameAlert)
+        swap(&self.singleRenameBaseName, &other.singleRenameBaseName)
+        swap(&self.itemToRename, &other.itemToRename)
+        swap(&self.isShowingBulkRenameAlert, &other.isShowingBulkRenameAlert)
+        swap(&self.bulkRenameBaseName, &other.bulkRenameBaseName)
+        swap(&self.showCopiedFeedback, &other.showCopiedFeedback)
+        swap(&self.notificationMessage, &other.notificationMessage)
+        swap(&self.folderHistory, &other.folderHistory)
+        swap(&self.compareImageURLs, &other.compareImageURLs)
+        swap(&self.undoHistory, &other.undoHistory)
+        swap(&self.canUndo, &other.canUndo)
+        swap(&self.navigationHistory, &other.navigationHistory)
+        swap(&self.navigationIndex, &other.navigationIndex)
+        swap(&self.fileOperation, &other.fileOperation)
+        swap(&self.isShowingDeleteConfirmation, &other.isShowingDeleteConfirmation)
+        swap(&self.deleteConfirmationCount, &other.deleteConfirmationCount)
+        swap(&self.pendingDeleteURLs, &other.pendingDeleteURLs)
+    }
+
+    func copySelectedItemToClipboard() {
         guard !self.selectedItemURLs.isEmpty else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
