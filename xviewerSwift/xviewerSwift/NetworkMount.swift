@@ -7,8 +7,32 @@
 //
 
 import Foundation
+import Darwin
 
 enum NetworkMount {
+
+    /// Devuelve todos los volúmenes de red montados actualmente en el sistema (SMB, AFP, NFS, etc.).
+    static func currentMountedNetworkVolumes() -> [URL] {
+        let keys: [URLResourceKey] = [.volumeIsLocalKey, .volumeNameKey, .volumeURLKey]
+        guard let mounted = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) else {
+            return []
+        }
+
+        return mounted.filter { url in
+            if let rv = try? url.resourceValues(forKeys: Set(keys)),
+               let isLocal = rv.volumeIsLocal, !isLocal {
+                return true
+            }
+            var stat = statfs()
+            if statfs(url.path, &stat) == 0 {
+                let fsType = withUnsafePointer(to: &stat.f_fstypename) {
+                    $0.withMemoryRebound(to: CChar.self, capacity: 16) { String(cString: $0) }
+                }
+                return (stat.f_flags & UInt32(MNT_LOCAL)) == 0 || fsType == "smbfs" || fsType == "afpfs" || fsType == "nfs"
+            }
+            return false
+        }
+    }
 
     enum MountError: LocalizedError {
         case invalidURL

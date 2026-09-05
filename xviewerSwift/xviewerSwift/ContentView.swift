@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 import QuickLookThumbnailing
 import CryptoKit
 import ImageIO
+import Darwin
 
 // MARK: - Environment Key for Per-Pane ThumbnailLoader
 private struct ThumbnailLoaderKey: EnvironmentKey {
@@ -267,6 +268,29 @@ class GIFAnimator {
     }
 }
 
+/// Caché en memoria thread-safe para iconos del sistema por extensión de archivo.
+final class FileIconCache {
+    static let shared = FileIconCache()
+    private var cache: [String: NSImage] = [:]
+    private let lock = NSLock()
+
+    func icon(forExtension ext: String) -> NSImage {
+        let normalized = ext.lowercased()
+        lock.lock()
+        if let cached = cache[normalized] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        let icon = NSWorkspace.shared.icon(forFileType: normalized)
+        lock.lock()
+        cache[normalized] = icon
+        lock.unlock()
+        return icon
+    }
+}
+
 /// Identidad del contenido de un archivo (no de su ruta).
 struct FileVersion: Equatable {
     let modificationDate: Date
@@ -301,7 +325,7 @@ struct FileItemView: View {
     var body: some View {
         Group {
             if !item.isImage {
-                Image(nsImage: NSWorkspace.shared.icon(forFileType: item.url.pathExtension))
+                Image(nsImage: FileIconCache.shared.icon(forExtension: item.url.pathExtension))
                     .resizable()
                     .scaledToFit()
                     .frame(width: 80, height: 80)
@@ -317,7 +341,7 @@ struct FileItemView: View {
                 Group {
                     if !item.isLocal {
                         // Estrategia 3: icono de tipo de archivo al instante (sin red) mientras carga el thumb real
-                        Image(nsImage: NSWorkspace.shared.icon(forFileType: item.url.pathExtension))
+                        Image(nsImage: FileIconCache.shared.icon(forExtension: item.url.pathExtension))
                             .resizable()
                             .scaledToFit()
                             .frame(width: 80, height: 80)
@@ -358,7 +382,7 @@ struct FileItemView: View {
             self.thumbnail = img
         } else if !item.isLocal && !Task.isCancelled {
             // Fallback remoto: icono genérico del sistema (solo si no fue cancelado)
-            let icon = NSWorkspace.shared.icon(forFileType: item.url.pathExtension)
+            let icon = FileIconCache.shared.icon(forExtension: item.url.pathExtension)
             ThumbnailCache.shared.set(icon, for: item.url)
             Task.detached(priority: .background) {
                 ThumbnailDiskCache.shared.set(icon, for: item.url, modificationDate: item.modificationDate, fileSize: item.fileSize)
@@ -810,11 +834,10 @@ struct FullScreenImageView: View {
     }
 
     private func loadImage(from url: URL) {
-        // Cambio 1: Security-scoped resource access (para SMB y archivos sandbox)
-        let isAccessed = url.startAccessingSecurityScopedResource()
-        defer { if isAccessed { url.stopAccessingSecurityScopedResource() } }
-
         DispatchQueue.global(qos: .userInteractive).async {
+            let isAccessed = url.startAccessingSecurityScopedResource()
+            defer { if isAccessed { url.stopAccessingSecurityScopedResource() } }
+
             if GIFAnimator.isGIF(url), let frames = GIFAnimator.extractFrames(from: url) {
                 DispatchQueue.main.async {
                     self.gifFrames = frames
@@ -822,9 +845,18 @@ struct FullScreenImageView: View {
                     self.startGIFAnimation(frames)
                 }
             } else {
-                // Cambio 5: Estrategia de carga para remoto vs local
-                let isSMB = url.path.lowercased().contains("/volumes/") &&
-                            (url.path.lowercased().contains("smb") || url.path.lowercased().contains("cifs"))
+                var isSMB = false
+                var stat = statfs()
+                if statfs(url.path, &stat) == 0 {
+                    let fsType = withUnsafePointer(to: &stat.f_fstypename) {
+                        $0.withMemoryRebound(to: CChar.self, capacity: 16) { String(cString: $0) }
+                    }
+                    isSMB = (fsType == "smbfs") || ((stat.f_flags & UInt32(MNT_LOCAL)) == 0)
+                }
+                if !isSMB {
+                    let pathString = url.path.lowercased()
+                    isSMB = pathString.contains("/volumes/") && (pathString.contains("smb") || pathString.contains("cifs"))
+                }
 
                 var loadedImage: NSImage? = nil
 
@@ -1272,14 +1304,6 @@ struct GridItemCell: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(
-                    key: ActiveItemFrameKey.self,
-                    value: isActive ? geo.frame(in: .global) : .zero
-                )
-            }
-        )
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 8)
@@ -1513,14 +1537,6 @@ class ContextMenuHandler: NSObject {
 }
 
 
-struct ActiveItemFrameKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        let next = nextValue()
-        if next != .zero { value = next }
-    }
-}
-
 enum ActivePane {
     case left
     case right
@@ -1563,7 +1579,6 @@ struct WorkspaceView: View {
         get { tab.activePane }
         nonmutating set { tab.activePane = newValue }
     }
-    @State private var activeItemGlobalFrame: CGRect = .zero
     @State private var crossPaneCompareURLs: [URL]? = nil
     @State private var sidebarWidth: CGFloat = 160
     @State private var startingWidth: CGFloat = 160
@@ -1976,21 +1991,7 @@ struct WorkspaceView: View {
             menu.addItem(crossItem)
         }
 
-        // Convert SwiftUI global frame to screen coordinates for NSMenu positioning
-        // SwiftUI global space has origin at top-left of window content; NSScreen at bottom-left
-        let screenPoint: NSPoint
-        if let window = NSApp.keyWindow, activeItemGlobalFrame != .zero {
-            let contentHeight = window.contentView?.bounds.height ?? 0
-            let windowOrigin = window.frame.origin
-            // SwiftUI Y increases downward; NSWindow Y increases upward — flip
-            let nsWindowY = contentHeight - activeItemGlobalFrame.maxY
-            screenPoint = NSPoint(
-                x: windowOrigin.x + activeItemGlobalFrame.midX,
-                y: windowOrigin.y + nsWindowY
-            )
-        } else {
-            screenPoint = NSEvent.mouseLocation
-        }
+        let screenPoint = NSEvent.mouseLocation
 
         let event = NSEvent.mouseEvent(
             with: .rightMouseDown,
@@ -2519,9 +2520,6 @@ struct WorkspaceView: View {
 
     var body: some View {
         layoutWithSessionObservers
-            .onPreferenceChange(ActiveItemFrameKey.self) { frame in
-                if frame != .zero { activeItemGlobalFrame = frame }
-            }
             .preferredColorScheme(.dark)
             .sheet(isPresented: $session.isShowingProperties) {
                 if let url = session.propertiesURL { PropertiesView(url: url) }

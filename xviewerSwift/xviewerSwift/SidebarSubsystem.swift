@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import CoreFoundation
 import UniformTypeIdentifiers
 
@@ -48,13 +49,19 @@ class SidebarManager: ObservableObject {
     private let recencyWeightDays = 30.0
 
     private var accessedURLs: [URL] = []
+    private var volumeNotificationObservers: [NSObjectProtocol] = []
 
     init() {
         loadDefaultSources()
         loadState()
+        refreshMountedNetworkVolumes()
+        setupVolumeNotifications()
     }
 
     deinit {
+        for observer in volumeNotificationObservers {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
         // Liberar todos los recursos security-scoped abiertos
         for url in accessedURLs {
             url.stopAccessingSecurityScopedResource()
@@ -208,6 +215,40 @@ class SidebarManager: ObservableObject {
         }
         network.removeAll { $0.url == url }
         saveState()
+    }
+
+    /// Detecta volúmenes de red actualmente montados (SMB, AFP, NFS) y los enlaza en el sidebar.
+    func refreshMountedNetworkVolumes() {
+        // 1. Remover montajes que ya no existan o se hayan desmontado del sistema
+        network.removeAll { item in
+            !FileManager.default.fileExists(atPath: item.url.path)
+        }
+
+        // 2. Detectar y enlazar automáticamente todos los volúmenes de red montados
+        let detected = NetworkMount.currentMountedNetworkVolumes()
+        for url in detected {
+            addNetworkMount(url: url)
+        }
+    }
+
+    private func setupVolumeNotifications() {
+        let didMountObs = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didMountNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshMountedNetworkVolumes()
+        }
+
+        let didUnmountObs = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didUnmountNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshMountedNetworkVolumes()
+        }
+
+        volumeNotificationObservers = [didMountObs, didUnmountObs]
     }
     
     private func createBookmark(for url: URL) -> Data? {

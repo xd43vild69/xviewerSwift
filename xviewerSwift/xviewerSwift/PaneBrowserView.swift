@@ -13,6 +13,15 @@ struct PaneBrowserView: View {
 
         GeometryReader { geometry in
             let columns = GridLayout.columnCount(for: geometry.size.width)
+            let bookmarkedURLs = Set(sidebarManager.bookmarks.map(\.url))
+            let selectedImageCount: Int = {
+                guard !session.selectedItemURLs.isEmpty else { return 0 }
+                let imageURLs = Set(session.imageItems.map(\.url))
+                return session.selectedItemURLs.intersection(imageURLs).count
+            }()
+            let canSamePaneCompare = (selectedImageCount == 2)
+            let canCrossPaneCompare = (crossPaneCompareAction != nil && selectedImageCount == 1 && otherPaneSelectedImageCount == 1)
+
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 100)), count: columns), spacing: GridLayout.spacing) {
@@ -54,9 +63,9 @@ struct PaneBrowserView: View {
                                     session.propertiesURL = url
                                     session.isShowingProperties = true
                                 },
-                                isBookmarked: sidebarManager.bookmarks.contains(where: { $0.url == item.url }),
+                                isBookmarked: bookmarkedURLs.contains(item.url),
                                 toggleBookmarkAction: {
-                                    if sidebarManager.bookmarks.contains(where: { $0.url == item.url }) {
+                                    if bookmarkedURLs.contains(item.url) {
                                         sidebarManager.unpinFolder(url: item.url)
                                     } else {
                                         sidebarManager.pinFolder(url: item.url)
@@ -71,31 +80,11 @@ struct PaneBrowserView: View {
                                     session.updateSelectionAnchor(url)
                                 },
                                 isActive: session.activeItemURL == item.url,
-                                canCompare: {
-                                    let thisPaneImages = session.selectedItemURLs.filter { url in
-                                        if let found = session.folderContents.first(where: { $0.url == url }) {
-                                            return !found.isDirectory && found.isImage
-                                        }
-                                        return false
-                                    }
-                                    let samePaneOk = thisPaneImages.count == 2
-                                        && !item.isDirectory
-                                        && session.selectedItemURLs.contains(item.url)
-                                    let crossPaneOk = crossPaneCompareAction != nil
-                                        && !item.isDirectory
-                                        && thisPaneImages.count == 1
-                                        && session.selectedItemURLs.contains(item.url)
-                                        && otherPaneSelectedImageCount == 1
-                                    return samePaneOk || crossPaneOk
-                                }(),
+                                canCompare: !item.isDirectory && (canSamePaneCompare || canCrossPaneCompare) && session.selectedItemURLs.contains(item.url),
                                 compareAction: {
-                                    let singlePaneURLs = Array(session.selectedItemURLs)
-                                        .filter { url in
-                                            if let found = session.folderContents.first(where: { $0.url == url }) {
-                                                return !found.isDirectory && found.isImage
-                                            }
-                                            return false
-                                        }
+                                    let singlePaneURLs = session.folderContents.filter {
+                                        !$0.isDirectory && $0.isImage && session.selectedItemURLs.contains($0.url)
+                                    }.map(\.url)
                                     if singlePaneURLs.count == 2 {
                                         session.compareImageURLs = singlePaneURLs
                                     } else {

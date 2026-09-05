@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import QuickLookThumbnailing
+import Darwin
 
 // MARK: - Thumbnail Loader (Per-Pane Semaphore)
 class ThumbnailLoader {
@@ -128,6 +129,7 @@ class BrowserSession: ObservableObject {
     @Published var activeItemURL: URL?
     @Published var currentSortOrder: SortOrder = .name {
         didSet {
+            self.allFolderContents = self.sortItems(allFolderContents)
             updateFilteredFolderContents()
         }
     }
@@ -145,12 +147,12 @@ class BrowserSession: ObservableObject {
     var allFolderContents: [FileItem] = []
 
     func updateFilteredFolderContents() {
-        let sorted = self.sortItems(allFolderContents)
-        if filterText.isEmpty {
-            self.folderContents = sorted
+        let trimmedFilter = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedFilter.isEmpty {
+            self.folderContents = allFolderContents
         } else {
-            self.folderContents = sorted.filter { item in
-                item.name.localizedCaseInsensitiveContains(filterText)
+            self.folderContents = allFolderContents.filter { item in
+                item.name.localizedCaseInsensitiveContains(trimmedFilter)
             }
         }
         
@@ -1598,12 +1600,12 @@ class BrowserSession: ObservableObject {
         }
     }
 
-    func sortItems(_ items: [FileItem]) -> [FileItem] {
+    nonisolated func sortItems(_ items: [FileItem], order: SortOrder) -> [FileItem] {
         return items.sorted {
             if $0.isDirectory && !$1.isDirectory { return true }
             if !$0.isDirectory && $1.isDirectory { return false }
             
-            switch self.currentSortOrder {
+            switch order {
             case .name:
                 return $0.name.localizedStandardCompare($1.name) == .orderedAscending
             case .date:
@@ -1612,6 +1614,10 @@ class BrowserSession: ObservableObject {
                 return $0.fileSize > $1.fileSize
             }
         }
+    }
+
+    func sortItems(_ items: [FileItem]) -> [FileItem] {
+        sortItems(items, order: currentSortOrder)
     }
     
     func loadFolder(url: URL, sidebarManager: SidebarManager?, pushToHistory: Bool = true) {
@@ -1785,7 +1791,8 @@ class BrowserSession: ObservableObject {
 
             allItems.append(contentsOf: batch)
             if !allItems.isEmpty {
-                let sortedItems = await MainActor.run { self.sortItems(allItems) }
+                let order = await MainActor.run { self.currentSortOrder }
+                let sortedItems = self.sortItems(allItems, order: order)
 
                 if Task.isCancelled { return }
 
@@ -1809,22 +1816,19 @@ class BrowserSession: ObservableObject {
                 let loader = await MainActor.run { self.thumbnailLoader }
 
                 await MainActor.run {
-                    // Fase 1: Pre-generar ~40 visibles con prioridad alta
+                    // Fase 1 y Fase 2 unificadas en self.preloadTask para cancelación inmediata
                     self.preloadTask = Task.detached(priority: .userInitiated) { [weak loader, isLocalFolder] in
                         guard let loader else { return }
                         for item in visibleItems {
-                            guard !Task.isCancelled else { break }
+                            guard !Task.isCancelled else { return }
                             await ThumbnailCache.load(item: item, using: loader)
                         }
 
-                        // Fase 2 (precargar el resto) SOLO en folders locales.
-                        // En remoto saturaría la red; el resto se carga bajo demanda al hacer scroll.
-                        if isLocalFolder && !Task.isCancelled && !restItems.isEmpty {
-                            Task.detached(priority: .utility) {
-                                for item in restItems {
-                                    guard !Task.isCancelled else { break }
-                                    await ThumbnailCache.load(item: item, using: loader)
-                                }
+                        // Fase 2 (precargar el resto) SOLO en folders locales en la misma tarea cancelable
+                        if isLocalFolder && !restItems.isEmpty {
+                            for item in restItems {
+                                guard !Task.isCancelled else { return }
+                                await ThumbnailCache.load(item: item, using: loader)
                             }
                         }
                     }
@@ -1878,6 +1882,19 @@ class BrowserSession: ObservableObject {
     // MARK: - SMB Connectivity Check
 
     private func isSMBPath(_ url: URL) -> Bool {
+        var stat = statfs()
+        if statfs(url.path, &stat) == 0 {
+            let fsType = withUnsafePointer(to: &stat.f_fstypename) {
+                $0.withMemoryRebound(to: CChar.self, capacity: 16) { String(cString: $0) }
+            }
+            if fsType == "smbfs" {
+                return true
+            }
+        }
+        if let resourceValues = try? url.resourceValues(forKeys: [.volumeIsLocalKey]),
+           let isLocal = resourceValues.volumeIsLocal, !isLocal {
+            return true
+        }
         let pathString = url.path.lowercased()
         return pathString.hasPrefix("/volumes/") && (pathString.contains("smb") || pathString.contains("cifs"))
     }
