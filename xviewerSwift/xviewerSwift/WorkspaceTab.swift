@@ -42,8 +42,8 @@ final class WorkspaceTab: Identifiable, ObservableObject {
     func makeSnapshot() -> Snapshot {
         Snapshot(
             id: id,
-            sidebarSelectionBookmark: Self.secureBookmark(for: sidebarSelection),
-            sidebarSelectionRightBookmark: Self.secureBookmark(for: sidebarSelectionRight),
+            sidebarSelectionBookmark: Self.secureBookmark(for: session.currentFolderURL ?? sidebarSelection),
+            sidebarSelectionRightBookmark: Self.secureBookmark(for: sessionRight.currentFolderURL ?? sidebarSelectionRight),
             isSplitViewEnabled: isSplitViewEnabled
         )
     }

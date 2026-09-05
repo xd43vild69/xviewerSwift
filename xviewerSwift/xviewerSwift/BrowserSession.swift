@@ -229,6 +229,9 @@ class BrowserSession: ObservableObject {
     }
 
     func swapState(with other: BrowserSession) {
+        self.objectWillChange.send()
+        other.objectWillChange.send()
+
         loadTask?.cancel()
         metadataTask?.cancel()
         preloadTask?.cancel()

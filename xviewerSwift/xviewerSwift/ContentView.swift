@@ -1610,6 +1610,7 @@ struct WorkspaceView: View {
     @State private var startingWidth: CGFloat = 160
     @State private var isResizingSidebar = false
     @State private var isCursorPushed = false
+    @State private var isSwappingPanes = false
 
     enum FocusField: Hashable {
         case filterInputLeft
@@ -2053,14 +2054,18 @@ struct WorkspaceView: View {
 
     private func swapSplitPanes() {
         guard isSplitViewEnabled else { return }
+        isSwappingPanes = true
         withAnimation {
-            // Intercambiar selecciones del sidebar
-            let tempSelection = sidebarSelection
-            sidebarSelection = sidebarSelectionRight
-            sidebarSelectionRight = tempSelection
+            // Guardar rutas actuales de cada panel antes del intercambio
+            let leftFolder = session.currentFolderURL ?? sidebarSelection
+            let rightFolder = sessionRight.currentFolderURL ?? sidebarSelectionRight
 
             // Intercambiar estado completo de las sesiones
             session.swapState(with: sessionRight)
+
+            // Actualizar selecciones del sidebar sincronizadas con el nuevo orden
+            sidebarSelection = rightFolder
+            sidebarSelectionRight = leftFolder
 
             // Ajustar el panel activo para que siga enfocado en el contenido
             if activePane == .right {
@@ -2075,6 +2080,9 @@ struct WorkspaceView: View {
             }
             tab.objectWillChange.send()
             updateWindowTitle()
+        }
+        DispatchQueue.main.async {
+            self.isSwappingPanes = false
         }
     }
 
@@ -2432,10 +2440,16 @@ struct WorkspaceView: View {
         
         view = AnyView(view
             .onChange(of: sidebarSelection) { _, newURL in
-                if let url = newURL { session.loadFolder(url: url, sidebarManager: sidebarManager) }
+                guard !isSwappingPanes else { return }
+                if let url = newURL, url != session.currentFolderURL {
+                    session.loadFolder(url: url, sidebarManager: sidebarManager)
+                }
             }
             .onChange(of: sidebarSelectionRight) { _, newURL in
-                if let url = newURL { sessionRight.loadFolder(url: url, sidebarManager: sidebarManager) }
+                guard !isSwappingPanes else { return }
+                if let url = newURL, url != sessionRight.currentFolderURL {
+                    sessionRight.loadFolder(url: url, sidebarManager: sidebarManager)
+                }
             }
             .onChange(of: session.fullScreenImageURL) { _, newURL in
                 if let url = newURL {
@@ -2668,6 +2682,7 @@ struct WorkspaceView: View {
                         withAnimation {
                             isSplitViewEnabled.toggle()
                             if isSplitViewEnabled, let url = session.currentFolderURL {
+                                sidebarSelectionRight = url
                                 sessionRight.loadFolder(url: url, sidebarManager: sidebarManager)
                             }
                         }
@@ -2708,10 +2723,13 @@ struct WorkspaceView: View {
                     // la carpeta de un tab restaurado la primera vez que se monta.
                     session.loadFolder(url: url, sidebarManager: sidebarManager)
                 }
-                if sessionRight.currentFolderURL == nil && sidebarSelectionRight == nil {
-                    sidebarSelectionRight = sessionRight.restoreBookmark() ?? FileManager.default.homeDirectoryForCurrentUser
-                } else if sessionRight.currentFolderURL == nil, isSplitViewEnabled, let url = sidebarSelectionRight {
-                    sessionRight.loadFolder(url: url, sidebarManager: sidebarManager)
+                if isSplitViewEnabled {
+                    if sessionRight.currentFolderURL == nil && sidebarSelectionRight == nil {
+                        sidebarSelectionRight = session.currentFolderURL ?? FileManager.default.homeDirectoryForCurrentUser
+                    }
+                    if sessionRight.currentFolderURL == nil, let url = sidebarSelectionRight {
+                        sessionRight.loadFolder(url: url, sidebarManager: sidebarManager)
+                    }
                 }
                 updateWindowTitle()
             }
