@@ -1697,7 +1697,7 @@ class BrowserSession: ObservableObject {
         loadTask = Task.detached(priority: .userInitiated) { [weak self, isLocalFolder, showAllFilesLocal] in
             guard let self else { return }
 
-            let keys: [URLResourceKey] = [.isDirectoryKey, .creationDateKey, .contentModificationDateKey, .fileSizeKey, .volumeIsLocalKey]
+            let keys: [URLResourceKey] = [.isDirectoryKey, .creationDateKey, .contentModificationDateKey, .fileSizeKey, .volumeIsLocalKey, .tagNamesKey]
             let timeoutSeconds = isLocalFolder ? 5.0 : 30.0
 
             let fileURLs: [URL]?
@@ -1741,6 +1741,7 @@ class BrowserSession: ObservableObject {
                 var modDate = Date.distantPast
                 var fileSize: Int64 = 0
                 var isLocal = true
+                var tagColor: FinderColor? = nil
 
                 if let resourceValues = try? fileURL.resourceValues(forKeys: Set(keys)) {
                     isDirectory = resourceValues.isDirectory ?? false
@@ -1748,6 +1749,7 @@ class BrowserSession: ObservableObject {
                     modDate = resourceValues.contentModificationDate ?? fileDate
                     fileSize = Int64(resourceValues.fileSize ?? 0)
                     isLocal = resourceValues.volumeIsLocal ?? true
+                    tagColor = FinderColor.from(tags: resourceValues.tagNames)
                 }
 
                 let fileName = fileURL.lastPathComponent
@@ -1755,16 +1757,16 @@ class BrowserSession: ObservableObject {
                 if !isDirectory {
                     let ext = fileURL.pathExtension.lowercased()
                     if imageExtensions.contains(ext) {
-                        batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, modificationDate: modDate, fileSize: fileSize, isLocal: isLocal))
+                        batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, modificationDate: modDate, fileSize: fileSize, isLocal: isLocal, tagColor: tagColor))
                     } else {
                         if showAllFilesLocal {
-                            batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, modificationDate: modDate, fileSize: fileSize, isLocal: isLocal))
+                            batch.append(FileItem(url: fileURL, name: fileName, isDirectory: false, creationDate: fileDate, modificationDate: modDate, fileSize: fileSize, isLocal: isLocal, tagColor: tagColor))
                         } else {
                             otherCountLocal += 1
                         }
                     }
                 } else {
-                    batch.append(FileItem(url: fileURL, name: fileName, isDirectory: true, creationDate: fileDate, modificationDate: modDate, fileSize: fileSize, isLocal: isLocal))
+                    batch.append(FileItem(url: fileURL, name: fileName, isDirectory: true, creationDate: fileDate, modificationDate: modDate, fileSize: fileSize, isLocal: isLocal, tagColor: tagColor))
                 }
 
                 if batch.count >= 100 {
@@ -1842,6 +1844,29 @@ class BrowserSession: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Asigna o elimina el color de etiqueta de Finder para las URLs dadas y actualiza el estado en vivo.
+    func setTagColor(_ color: FinderColor?, for urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        for targetURL in urls {
+            do {
+                try FinderTagManager.setTagColor(color, for: targetURL)
+            } catch {
+                print("Error setting tag color for \(targetURL.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+
+        let targetSet = Set(urls)
+        self.allFolderContents = self.allFolderContents.map { item in
+            if targetSet.contains(item.url) {
+                var updated = item
+                updated.tagColor = color
+                return updated
+            }
+            return item
+        }
+        self.updateFilteredFolderContents()
     }
 
     func clearMemory() {

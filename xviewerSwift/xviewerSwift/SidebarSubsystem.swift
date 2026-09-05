@@ -23,6 +23,7 @@ struct SidebarFolderItem: Identifiable, Hashable {
     var isCurrentSessionVisit: Bool = true
     var bookmarkData: Data? = nil
     var isSecurityScopedAccessActive: Bool = false
+    var tagColor: FinderColor? = nil
 }
 
 struct PersistedSidebarItem: Codable {
@@ -143,20 +144,26 @@ class SidebarManager: ObservableObject {
         let downloads = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first ?? home.appendingPathComponent("Downloads")
         let pictures = fm.urls(for: .picturesDirectory, in: .userDomainMask).first ?? home.appendingPathComponent("Pictures")
         
+        let homeColor = FinderTagManager.tagColor(for: home)
+        let downColor = FinderTagManager.tagColor(for: downloads)
+        let picColor = FinderTagManager.tagColor(for: pictures)
+
         self.sources = [
-            SidebarFolderItem(url: home, name: "Home", systemIcon: "house"),
-            SidebarFolderItem(url: downloads, name: "Descargas", systemIcon: "arrow.down.circle"),
-            SidebarFolderItem(url: pictures, name: "Imágenes", systemIcon: "photo.on.rectangle")
+            SidebarFolderItem(url: home, name: "Home", systemIcon: "house", tagColor: homeColor),
+            SidebarFolderItem(url: downloads, name: "Descargas", systemIcon: "arrow.down.circle", tagColor: downColor),
+            SidebarFolderItem(url: pictures, name: "Imágenes", systemIcon: "photo.on.rectangle", tagColor: picColor)
         ]
     }
     
     /// Registro de visita con algoritmo híbrido (frecuencia + recencia, max 13)
     func recordRecentVisit(url: URL) {
+        let tagColor = FinderTagManager.tagColor(for: url)
         if let index = recent.firstIndex(where: { $0.url == url }) {
             var item = recent.remove(at: index)
             item.visitCount += 1
             item.lastVisitDate = Date.now
             item.isCurrentSessionVisit = true
+            item.tagColor = tagColor
             recent.insert(item, at: 0)
         } else {
             let bData = createBookmark(for: url)
@@ -167,7 +174,8 @@ class SidebarManager: ObservableObject {
                 visitCount: 1,
                 lastVisitDate: Date.now,
                 isCurrentSessionVisit: true,
-                bookmarkData: bData
+                bookmarkData: bData,
+                tagColor: tagColor
             )
             recent.insert(newItem, at: 0)
         }
@@ -189,7 +197,8 @@ class SidebarManager: ObservableObject {
     func pinFolder(url: URL) {
         guard !bookmarks.contains(where: { $0.url == url }) else { return }
         let bData = createBookmark(for: url)
-        let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "bookmark.fill", visitCount: 1, bookmarkData: bData)
+        let tagColor = FinderTagManager.tagColor(for: url)
+        let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "bookmark.fill", visitCount: 1, bookmarkData: bData, tagColor: tagColor)
         bookmarks.append(newItem)
         saveState()
     }
@@ -203,10 +212,37 @@ class SidebarManager: ObservableObject {
         saveState()
     }
 
+    /// Asigna o elimina el tag de color de Finder en una carpeta y actualiza todas las secciones del sidebar.
+    func setFolderTagColor(_ color: FinderColor?, for url: URL) {
+        do {
+            try FinderTagManager.setTagColor(color, for: url)
+        } catch {
+            print("Error updating Finder tag for \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+        updateTagColor(for: url, color: color)
+    }
+
+    /// Actualiza el color en memoria de todas las ocurrencias de una URL en el sidebar.
+    func updateTagColor(for url: URL, color: FinderColor?) {
+        func applyColor(to list: inout [SidebarFolderItem]) {
+            for idx in list.indices {
+                if list[idx].url == url {
+                    list[idx].tagColor = color
+                }
+            }
+        }
+        applyColor(to: &sources)
+        applyColor(to: &disks)
+        applyColor(to: &network)
+        applyColor(to: &bookmarks)
+        applyColor(to: &recent)
+    }
+
     func addNetworkMount(url: URL) {
         guard !network.contains(where: { $0.url == url }) else { return }
         let bData = createBookmark(for: url)
-        let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "network", visitCount: 1, bookmarkData: bData)
+        let tagColor = FinderTagManager.tagColor(for: url)
+        let newItem = SidebarFolderItem(url: url, name: url.lastPathComponent, systemIcon: "network", visitCount: 1, bookmarkData: bData, tagColor: tagColor)
         network.append(newItem)
         saveState()
     }
@@ -224,7 +260,8 @@ class SidebarManager: ObservableObject {
         guard !disks.contains(where: { $0.url == url }) else { return }
         let bData = createBookmark(for: url)
         let displayName = (try? url.resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName) ?? url.lastPathComponent
-        let newItem = SidebarFolderItem(url: url, name: displayName, systemIcon: "externaldrive.fill", visitCount: 1, bookmarkData: bData)
+        let tagColor = FinderTagManager.tagColor(for: url)
+        let newItem = SidebarFolderItem(url: url, name: displayName, systemIcon: "externaldrive.fill", visitCount: 1, bookmarkData: bData, tagColor: tagColor)
         disks.append(newItem)
     }
 
@@ -384,7 +421,8 @@ class SidebarManager: ObservableObject {
                     visitCount: pItem.visitCount,
                     lastVisitDate: pItem.lastVisitDate,
                     isCurrentSessionVisit: false,
-                    bookmarkData: pItem.bookmarkData
+                    bookmarkData: pItem.bookmarkData,
+                    tagColor: FinderTagManager.tagColor(for: validURL)
                 )
                 item.isSecurityScopedAccessActive = isAccessed
                 loadedItems.append(item)
@@ -409,6 +447,15 @@ struct SidebarNavigationView: View {
                 ForEach(manager.sources) { item in
                     SidebarItemRow(item: item, performDropAction: performDropAction)
                         .tag(item.url)
+                        .contextMenu {
+                            tagColorMenu(for: item)
+                            Divider()
+                            Button {
+                                NSWorkspace.shared.activateFileViewerSelecting([item.url])
+                            } label: {
+                                Label("Mostrar en Finder", systemImage: "folder")
+                            }
+                        }
                 }
             }
 
@@ -419,6 +466,8 @@ struct SidebarNavigationView: View {
                         SidebarItemRow(item: item, performDropAction: performDropAction)
                             .tag(item.url)
                             .contextMenu {
+                                tagColorMenu(for: item)
+                                Divider()
                                 Button {
                                     NSWorkspace.shared.activateFileViewerSelecting([item.url])
                                 } label: {
@@ -436,6 +485,8 @@ struct SidebarNavigationView: View {
                         SidebarItemRow(item: item, performDropAction: performDropAction)
                             .tag(item.url)
                             .contextMenu {
+                                tagColorMenu(for: item)
+                                Divider()
                                 Button(role: .destructive) {
                                     manager.removeNetworkMount(url: item.url)
                                 } label: {
@@ -452,6 +503,8 @@ struct SidebarNavigationView: View {
                     SidebarItemRow(item: item, performDropAction: performDropAction)
                         .tag(item.url)
                         .contextMenu {
+                            tagColorMenu(for: item)
+                            Divider()
                             Button(role: .destructive) {
                                 manager.unpinFolder(url: item.url)
                             } label: {
@@ -466,10 +519,47 @@ struct SidebarNavigationView: View {
                 ForEach(manager.recent) { item in
                     SidebarItemRow(item: item, performDropAction: performDropAction)
                         .tag(item.url)
+                        .contextMenu {
+                            tagColorMenu(for: item)
+                            Divider()
+                            Button {
+                                manager.pinFolder(url: item.url)
+                            } label: {
+                                Label("Añadir a Marcadores", systemImage: "bookmark")
+                            }
+                        }
                 }
             }
         }
         .listStyle(.sidebar)
+    }
+
+    @ViewBuilder
+    private func tagColorMenu(for item: SidebarFolderItem) -> some View {
+        Menu {
+            Button {
+                manager.setFolderTagColor(nil, for: item.url)
+            } label: {
+                HStack {
+                    Text("Sin color")
+                    if item.tagColor == nil {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+            Divider()
+            ForEach(FinderColor.allCases) { fColor in
+                Button {
+                    manager.setFolderTagColor(fColor, for: item.url)
+                } label: {
+                    HStack {
+                        Label(fColor.localizedName, systemImage: item.tagColor == fColor ? "checkmark.circle.fill" : "circle.fill")
+                    }
+                }
+            }
+        } label: {
+            Label("Color de etiqueta...", systemImage: "tag")
+        }
     }
 }
 
@@ -482,7 +572,9 @@ fileprivate struct SidebarItemRow: View {
 
     var body: some View {
         HStack {
-            Label(item.name, systemImage: item.systemIcon)
+            Image(systemName: item.systemIcon)
+                .foregroundColor(item.tagColor?.color ?? .accentColor)
+            Text(item.name)
             Spacer()
             if item.visitCount > 1 {
                 Text("\(item.visitCount)")

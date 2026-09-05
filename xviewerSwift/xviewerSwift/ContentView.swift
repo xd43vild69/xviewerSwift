@@ -41,6 +41,7 @@ struct FileItem: Identifiable, Hashable {
     let modificationDate: Date
     let fileSize: Int64
     let isLocal: Bool
+    var tagColor: FinderColor? = nil
 
     var isImage: Bool {
         let ext = url.pathExtension.lowercased()
@@ -1285,6 +1286,7 @@ struct GridItemCell: View {
     let isActive: Bool
     let canCompare: Bool
     let compareAction: () -> Void
+    var setTagColorAction: ((URL, FinderColor?) -> Void)? = nil
 
     @State private var isTargeted: Bool = false
 
@@ -1295,7 +1297,7 @@ struct GridItemCell: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 50, height: 50)
-                    .foregroundColor(.gray)
+                    .foregroundColor(item.tagColor?.color ?? .gray)
             } else {
                 FileItemView(item: item)
             }
@@ -1364,6 +1366,30 @@ struct GridItemCell: View {
             }
             if item.isDirectory {
                 Divider()
+                Menu {
+                    Button {
+                        setTagColorAction?(item.url, nil)
+                    } label: {
+                        HStack {
+                            Text("Sin color")
+                            if item.tagColor == nil {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                    Divider()
+                    ForEach(FinderColor.allCases) { fColor in
+                        Button {
+                            setTagColorAction?(item.url, fColor)
+                        } label: {
+                            HStack {
+                                Label(fColor.localizedName, systemImage: item.tagColor == fColor ? "checkmark.circle.fill" : "circle.fill")
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Color de etiqueta...", systemImage: "tag")
+                }
                 Button { toggleBookmarkAction() } label: {
                     Label(isBookmarked ? "Remove from Bookmarks" : "Add to Bookmarks", systemImage: isBookmarked ? "bookmark.slash" : "bookmark")
                 }
@@ -1696,11 +1722,18 @@ struct WorkspaceView: View {
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 let shiftPressed = event.modifierFlags.contains(.shift)
                 let commandPressed = event.modifierFlags.contains(.command)
+                let controlPressed = event.modifierFlags.contains(.control)
+                let optionPressed = event.modifierFlags.contains(.option)
                 
+                // Delegar Ctrl+Tab y Ctrl+Shift+Tab al monitor de nivel ventana (ContentView)
+                if controlPressed && !commandPressed && !optionPressed && event.keyCode == 48 {
+                    return event
+                }
+
                 // If a filter text field is focused, do not intercept keyboard events at all,
                 // except for F3 (keycode 99) and Tab (keycode 48) which resign focus.
                 if focusedField == .filterInputLeft || focusedField == .filterInputRight {
-                    if event.keyCode == 48 {
+                    if event.keyCode == 48 && !controlPressed {
                         focusedField = nil
                         NSApp.keyWindow?.makeFirstResponder(NSApp.keyWindow?.contentView)
                         return nil // consume event
@@ -1753,7 +1786,6 @@ struct WorkspaceView: View {
                         return nil
                     }
                 }
-                let optionPressed = event.modifierFlags.contains(.option)
 
                 // ⌥←/⌥→ mueve la selección al otro panel; agregando ⌘ la copia.
                 // Se maneja aquí (y no con .keyboardShortcut) porque SwiftUI no
@@ -1799,7 +1831,7 @@ struct WorkspaceView: View {
                     }
                 }
                 
-                if !commandPressed && !optionPressed {
+                if !commandPressed && !optionPressed && !controlPressed {
                     switch event.keyCode {
                     case 48: // Tab
                         if isSplitViewEnabled {
@@ -2764,6 +2796,7 @@ struct ContentView: View {
     @StateObject private var sidebarManager = SidebarManager()
     @State private var tabs: [WorkspaceTab]
     @State private var activeTabID: WorkspaceTab.ID
+    @State private var tabKeyMonitor: Any?
 
     init() {
         if let restored = TabSessionStore.restore() {
@@ -2785,6 +2818,12 @@ struct ContentView: View {
             }
         }
         .background(WindowTopBorder(color: .systemPurple, height: 2.5))
+        .onAppear {
+            setupTabKeyMonitor()
+        }
+        .onDisappear {
+            removeTabKeyMonitor()
+        }
         .onChange(of: activeTabID) { _, _ in
             ImmersiveWindowController.shared.hide()
             saveSession()
@@ -2798,6 +2837,43 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             saveSession()
         }
+    }
+
+    private func setupTabKeyMonitor() {
+        guard tabKeyMonitor == nil else { return }
+        tabKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Si hay una hoja modal (como Ajustes) visible, no alternar pestañas
+            if NSApp.keyWindow?.attachedSheet != nil {
+                return event
+            }
+
+            let controlPressed = event.modifierFlags.contains(.control)
+            let commandPressed = event.modifierFlags.contains(.command)
+            let optionPressed = event.modifierFlags.contains(.option)
+            let shiftPressed = event.modifierFlags.contains(.shift)
+
+            // Ctrl + Tab: siguiente pestaña cíclicamente.
+            // Ctrl + Shift + Tab: pestaña anterior cíclicamente.
+            if controlPressed && !commandPressed && !optionPressed && event.keyCode == 48 {
+                cycleTab(by: shiftPressed ? -1 : 1)
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeTabKeyMonitor() {
+        if let monitor = tabKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            tabKeyMonitor = nil
+        }
+    }
+
+    private func cycleTab(by offset: Int) {
+        guard tabs.count > 1, let currentIndex = tabs.firstIndex(where: { $0.id == activeTabID }) else { return }
+        let count = tabs.count
+        let newIndex = ((currentIndex + offset) % count + count) % count
+        activeTabID = tabs[newIndex].id
     }
 
     private func saveSession() {

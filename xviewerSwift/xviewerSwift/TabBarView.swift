@@ -60,6 +60,12 @@ struct TabBarView: View {
                 Button(action: { cycleTab(by: -1) }) { Text("") }
                     .keyboardShortcut("[", modifiers: [.command, .shift])
                     .opacity(0)
+                Button(action: { cycleTab(by: 1) }) { Text("") }
+                    .keyboardShortcut(.tab, modifiers: [.control])
+                    .opacity(0)
+                Button(action: { cycleTab(by: -1) }) { Text("") }
+                    .keyboardShortcut(.tab, modifiers: [.control, .shift])
+                    .opacity(0)
             }
         )
         .onChange(of: tabs.map(\.id)) { _, newIDs in
@@ -109,7 +115,7 @@ struct TabBarView: View {
     }
 
     private func cycleTab(by offset: Int) {
-        guard let currentIndex = tabs.firstIndex(where: { $0.id == activeTabID }) else { return }
+        guard tabs.count > 1, let currentIndex = tabs.firstIndex(where: { $0.id == activeTabID }) else { return }
         let count = tabs.count
         let newIndex = ((currentIndex + offset) % count + count) % count
         activeTabID = tabs[newIndex].id

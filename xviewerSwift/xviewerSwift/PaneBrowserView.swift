@@ -90,6 +90,16 @@ struct PaneBrowserView: View {
                                     } else {
                                         crossPaneCompareAction?()
                                     }
+                                },
+                                setTagColorAction: { targetURL, color in
+                                    let urlsToUpdate: [URL]
+                                    if session.selectedItemURLs.contains(targetURL) && session.selectedItemURLs.count > 1 {
+                                        urlsToUpdate = Array(session.selectedItemURLs)
+                                    } else {
+                                        urlsToUpdate = [targetURL]
+                                    }
+                                    session.setTagColor(color, for: urlsToUpdate)
+                                    sidebarManager.updateTagColor(for: targetURL, color: color)
                                 }
                             )
                             .id(item.url)
