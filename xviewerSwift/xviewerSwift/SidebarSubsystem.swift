@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 
 enum SidebarSection: String, CaseIterable {
     case sources = "Sources"
+    case disks = "Disks"
     case network = "Network"
     case bookmarks = "Bookmarks"
     case recent = "Recents"
@@ -37,6 +38,7 @@ struct PersistedSidebarItem: Codable {
 @MainActor
 class SidebarManager: ObservableObject {
     @Published var sources: [SidebarFolderItem] = []
+    @Published var disks: [SidebarFolderItem] = []
     @Published var network: [SidebarFolderItem] = []
     @Published var bookmarks: [SidebarFolderItem] = []
     @Published var recent: [SidebarFolderItem] = []
@@ -54,6 +56,7 @@ class SidebarManager: ObservableObject {
     init() {
         loadDefaultSources()
         loadState()
+        refreshMountedDisks()
         refreshMountedNetworkVolumes()
         setupVolumeNotifications()
     }
@@ -217,6 +220,36 @@ class SidebarManager: ObservableObject {
         saveState()
     }
 
+    func addMountedDisk(url: URL) {
+        guard !disks.contains(where: { $0.url == url }) else { return }
+        let bData = createBookmark(for: url)
+        let displayName = (try? url.resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName) ?? url.lastPathComponent
+        let newItem = SidebarFolderItem(url: url, name: displayName, systemIcon: "externaldrive.fill", visitCount: 1, bookmarkData: bData)
+        disks.append(newItem)
+    }
+
+    func removeMountedDisk(url: URL) {
+        if let item = disks.first(where: { $0.url == url }), item.isSecurityScopedAccessActive {
+            url.stopAccessingSecurityScopedResource()
+            accessedURLs.removeAll { $0 == url }
+        }
+        disks.removeAll { $0.url == url }
+    }
+
+    /// Detecta unidades de disco externas/locales montadas en el sistema y las enlaza en el sidebar.
+    func refreshMountedDisks() {
+        // 1. Remover discos que ya no existan o se hayan desmontado
+        disks.removeAll { item in
+            !FileManager.default.fileExists(atPath: item.url.path)
+        }
+
+        // 2. Detectar y enlazar automáticamente todos los discos montados
+        let detected = NetworkMount.currentMountedLocalDisks()
+        for url in detected {
+            addMountedDisk(url: url)
+        }
+    }
+
     /// Detecta volúmenes de red actualmente montados (SMB, AFP, NFS) y los enlaza en el sidebar.
     func refreshMountedNetworkVolumes() {
         // 1. Remover montajes que ya no existan o se hayan desmontado del sistema
@@ -237,6 +270,7 @@ class SidebarManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            self?.refreshMountedDisks()
             self?.refreshMountedNetworkVolumes()
         }
 
@@ -245,6 +279,7 @@ class SidebarManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            self?.refreshMountedDisks()
             self?.refreshMountedNetworkVolumes()
         }
 
@@ -374,6 +409,23 @@ struct SidebarNavigationView: View {
                 ForEach(manager.sources) { item in
                     SidebarItemRow(item: item, performDropAction: performDropAction)
                         .tag(item.url)
+                }
+            }
+
+            // Sección: Discos
+            if !manager.disks.isEmpty {
+                Section(header: Text(SidebarSection.disks.rawValue)) {
+                    ForEach(manager.disks) { item in
+                        SidebarItemRow(item: item, performDropAction: performDropAction)
+                            .tag(item.url)
+                            .contextMenu {
+                                Button {
+                                    NSWorkspace.shared.activateFileViewerSelecting([item.url])
+                                } label: {
+                                    Label("Mostrar en Finder", systemImage: "folder")
+                                }
+                            }
+                    }
                 }
             }
 

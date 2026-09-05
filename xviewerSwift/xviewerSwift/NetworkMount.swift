@@ -34,6 +34,63 @@ enum NetworkMount {
         }
     }
 
+    /// Devuelve todos los discos físicos/externos o imágenes montadas en el sistema (excluyendo el disco raíz / y volúmenes de red).
+    static func currentMountedLocalDisks() -> [URL] {
+        let keys: [URLResourceKey] = [
+            .volumeIsLocalKey,
+            .volumeNameKey,
+            .volumeURLKey,
+            .volumeIsRootFileSystemKey,
+            .volumeIsInternalKey,
+            .volumeIsRemovableKey,
+            .volumeIsEjectableKey
+        ]
+        guard let mounted = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) else {
+            return []
+        }
+
+        let networkVolumes = Set(currentMountedNetworkVolumes().map { $0.standardizedFileURL.path })
+
+        return mounted.filter { url in
+            let path = url.standardizedFileURL.path
+            // 1. Excluir el volumen raíz del sistema "/"
+            if path == "/" { return false }
+            // 2. Excluir volúmenes del sistema interno de macOS (/System/Volumes/...)
+            if path.hasPrefix("/System/Volumes") { return false }
+            // 3. Excluir volúmenes de desarrollo/simulador
+            if path.hasPrefix("/Library/Developer") { return false }
+            // 4. Excluir volúmenes ya identificados como de red
+            if networkVolumes.contains(path) { return false }
+
+            // 5. Verificar con statfs que no sea un volumen de red
+            var stat = statfs()
+            if statfs(url.path, &stat) == 0 {
+                let fsType = withUnsafePointer(to: &stat.f_fstypename) {
+                    $0.withMemoryRebound(to: CChar.self, capacity: 16) { String(cString: $0) }
+                }
+                if fsType == "smbfs" || fsType == "afpfs" || fsType == "nfs" || fsType == "autofs" || fsType == "devfs" {
+                    return false
+                }
+                if (stat.f_flags & UInt32(MNT_LOCAL)) == 0 {
+                    return false
+                }
+                // Si está montado en /Volumes/* o es removible/eyectable/externo, es un disco de usuario
+                if path.hasPrefix("/Volumes/") {
+                    return true
+                }
+            }
+
+            if let rv = try? url.resourceValues(forKeys: Set(keys)) {
+                if rv.volumeIsRootFileSystem == true { return false }
+                if rv.volumeIsRemovable == true || rv.volumeIsEjectable == true || rv.volumeIsInternal == false {
+                    return true
+                }
+            }
+
+            return false
+        }
+    }
+
     enum MountError: LocalizedError {
         case invalidURL
         case noMountPoint
