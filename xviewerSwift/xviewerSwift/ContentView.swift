@@ -2663,6 +2663,63 @@ struct WorkspaceView: View {
 
     }
 
+// MARK: - Window Top Border (Accent indicator)
+
+struct WindowTopBorder: NSViewRepresentable {
+    var color: NSColor = .systemPurple
+    var height: CGFloat = 2.5
+
+    func makeNSView(context: Context) -> TopBorderHostView {
+        let view = TopBorderHostView()
+        view.accentColor = color
+        view.accentHeight = height
+        return view
+    }
+
+    func updateNSView(_ nsView: TopBorderHostView, context: Context) {
+        nsView.accentColor = color
+        nsView.accentHeight = height
+        nsView.updateBorder()
+    }
+}
+
+final class TopBorderLineView: NSView {}
+
+final class TopBorderHostView: NSView {
+    var accentColor: NSColor = .systemPurple
+    var accentHeight: CGFloat = 2.5
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        DispatchQueue.main.async { [weak self] in
+            self?.updateBorder()
+        }
+    }
+
+    func updateBorder() {
+        guard let window = self.window,
+              let frameView = window.contentView?.superview else { return }
+
+        let existing = frameView.subviews.first(where: { $0 is TopBorderLineView }) as? TopBorderLineView
+        let borderView = existing ?? TopBorderLineView()
+        borderView.wantsLayer = true
+        borderView.layer?.backgroundColor = accentColor.cgColor
+
+        if existing == nil {
+            borderView.translatesAutoresizingMaskIntoConstraints = false
+            frameView.addSubview(borderView, positioned: .above, relativeTo: nil)
+            NSLayoutConstraint.activate([
+                borderView.topAnchor.constraint(equalTo: frameView.topAnchor),
+                borderView.leadingAnchor.constraint(equalTo: frameView.leadingAnchor),
+                borderView.trailingAnchor.constraint(equalTo: frameView.trailingAnchor),
+                borderView.heightAnchor.constraint(equalToConstant: accentHeight)
+            ])
+        } else {
+            frameView.addSubview(borderView, positioned: .above, relativeTo: nil)
+        }
+    }
+}
+
 // MARK: - Root container (tabs)
 
 struct ContentView: View {
@@ -2695,6 +2752,7 @@ struct ContentView: View {
                     .id(tab.id)
             }
         }
+        .background(WindowTopBorder(color: .systemPurple, height: 2.5))
         .onChange(of: activeTabID) { _, _ in
             ImmersiveWindowController.shared.hide()
             saveSession()
