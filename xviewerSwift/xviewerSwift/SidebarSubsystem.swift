@@ -57,9 +57,8 @@ class SidebarManager: ObservableObject {
     init() {
         loadDefaultSources()
         loadState()
-        refreshMountedDisks()
-        refreshMountedNetworkVolumes()
         setupVolumeNotifications()
+        refreshMountedVolumesAsync()
     }
 
     deinit {
@@ -273,51 +272,57 @@ class SidebarManager: ObservableObject {
         disks.removeAll { $0.url == url }
     }
 
-    /// Detecta unidades de disco externas/locales montadas en el sistema y las enlaza en el sidebar.
-    func refreshMountedDisks() {
-        // 1. Remover discos que ya no existan o se hayan desmontado
-        disks.removeAll { item in
-            !FileManager.default.fileExists(atPath: item.url.path)
-        }
+    /// Ejecuta la detección de discos y volúmenes de red en segundo plano para no congelar el hilo principal.
+    func refreshMountedVolumesAsync() {
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let detectedDisks = NetworkMount.currentMountedLocalDisks()
+            let detectedNetwork = NetworkMount.currentMountedNetworkVolumes()
 
-        // 2. Detectar y enlazar automáticamente todos los discos montados
-        let detected = NetworkMount.currentMountedLocalDisks()
-        for url in detected {
-            addMountedDisk(url: url)
+            await MainActor.run { [weak self] in
+                guard let self = self else { return }
+                // 1. Discos locales/externos
+                self.disks.removeAll { item in
+                    !FileManager.default.fileExists(atPath: item.url.path)
+                }
+                for url in detectedDisks {
+                    self.addMountedDisk(url: url)
+                }
+
+                // 2. Volúmenes de red
+                self.network.removeAll { item in
+                    !FileManager.default.fileExists(atPath: item.url.path)
+                }
+                for url in detectedNetwork {
+                    self.addNetworkMount(url: url)
+                }
+            }
         }
     }
 
-    /// Detecta volúmenes de red actualmente montados (SMB, AFP, NFS) y los enlaza en el sidebar.
-    func refreshMountedNetworkVolumes() {
-        // 1. Remover montajes que ya no existan o se hayan desmontado del sistema
-        network.removeAll { item in
-            !FileManager.default.fileExists(atPath: item.url.path)
-        }
+    /// Mantiene compatibilidad disparando el escaneo en segundo plano.
+    func refreshMountedDisks() {
+        refreshMountedVolumesAsync()
+    }
 
-        // 2. Detectar y enlazar automáticamente todos los volúmenes de red montados
-        let detected = NetworkMount.currentMountedNetworkVolumes()
-        for url in detected {
-            addNetworkMount(url: url)
-        }
+    func refreshMountedNetworkVolumes() {
+        refreshMountedVolumesAsync()
     }
 
     private func setupVolumeNotifications() {
         let didMountObs = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didMountNotification,
             object: nil,
-            queue: .main
+            queue: nil
         ) { [weak self] _ in
-            self?.refreshMountedDisks()
-            self?.refreshMountedNetworkVolumes()
+            self?.refreshMountedVolumesAsync()
         }
 
         let didUnmountObs = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didUnmountNotification,
             object: nil,
-            queue: .main
+            queue: nil
         ) { [weak self] _ in
-            self?.refreshMountedDisks()
-            self?.refreshMountedNetworkVolumes()
+            self?.refreshMountedVolumesAsync()
         }
 
         volumeNotificationObservers = [didMountObs, didUnmountObs]
@@ -402,7 +407,7 @@ class SidebarManager: ObservableObject {
             var url: URL?
             do {
                 url = try URL(resolvingBookmarkData: pItem.bookmarkData, options: [.withSecurityScope, .withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &isStale)
-                if let resolvedURL = url, !((try? resolvedURL.checkResourceIsReachable()) ?? false) {
+                if let resolvedURL = url, !FileManager.default.fileExists(atPath: resolvedURL.path) {
                     continue
                 }
             } catch {
@@ -414,6 +419,8 @@ class SidebarManager: ObservableObject {
                 if isAccessed {
                     accessedURLs.append(validURL)
                 }
+                let isLocal = (try? validURL.resourceValues(forKeys: [.volumeIsLocalKey]))?.volumeIsLocal ?? true
+                let color = isLocal ? FinderTagManager.tagColor(for: validURL) : nil
                 var item = SidebarFolderItem(
                     url: validURL,
                     name: pItem.name,
@@ -422,7 +429,7 @@ class SidebarManager: ObservableObject {
                     lastVisitDate: pItem.lastVisitDate,
                     isCurrentSessionVisit: false,
                     bookmarkData: pItem.bookmarkData,
-                    tagColor: FinderTagManager.tagColor(for: validURL)
+                    tagColor: color
                 )
                 item.isSecurityScopedAccessActive = isAccessed
                 loadedItems.append(item)

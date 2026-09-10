@@ -1287,6 +1287,7 @@ struct GridItemCell: View {
     let canCompare: Bool
     let compareAction: () -> Void
     var setTagColorAction: ((URL, FinderColor?) -> Void)? = nil
+    var onActivatePane: (() -> Void)? = nil
 
     @State private var isTargeted: Bool = false
 
@@ -1317,6 +1318,7 @@ struct GridItemCell: View {
         )
         .help(item.url.lastPathComponent)
         .onTapGesture(count: 2) {
+            onActivatePane?()
             if item.isDirectory {
                 activeItemURL = item.url
                 selectedItemURLs = [item.url]
@@ -1328,6 +1330,7 @@ struct GridItemCell: View {
             }
         }
         .onTapGesture(count: 1) {
+            onActivatePane?()
             if NSEvent.modifierFlags.contains(.command) || NSEvent.modifierFlags.contains(.shift) {
                 if selectedItemURLs.contains(item.url) {
                     selectedItemURLs.remove(item.url)
@@ -1422,6 +1425,7 @@ struct GridItemCell: View {
             }
         }
         .onDrag {
+            onActivatePane?()
             if !selectedItemURLs.contains(item.url) {
                 selectedItemURLs = [item.url]
                 activeItemURL = item.url
@@ -1694,8 +1698,13 @@ struct WorkspaceView: View {
     private func moveSelectionToOtherPane(direction: ActivePane, isCopy: Bool = false) {
         guard isSplitViewEnabled else { return }
 
-        let sourceSession = (direction == .right) ? session : sessionRight
-        let destSession = (direction == .right) ? sessionRight : session
+        let originPane = activePane
+        if (originPane == .left && direction != .right) || (originPane == .right && direction != .left) {
+            return
+        }
+
+        let sourceSession = (originPane == .left) ? session : sessionRight
+        let destSession = (originPane == .left) ? sessionRight : session
 
         guard let sourceFolder = sourceSession.currentFolderURL,
               let destFolder = destSession.currentFolderURL else { return }
@@ -1708,11 +1717,19 @@ struct WorkspaceView: View {
         let urlsToMove = Array(sourceSession.selectedItemURLs)
         if urlsToMove.isEmpty { return }
 
-        sourceSession.moveFiles(urls: urlsToMove, to: destFolder, isCopy: isCopy)
+        // El foco debe permanecer en el panel de origen
+        activePane = originPane
 
-        // Refresh destination panel
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            destSession.loadFolder(url: destFolder, sidebarManager: self.sidebarManager)
+        let currentTab = self.tab
+        let manager = self.sidebarManager
+        sourceSession.moveFiles(urls: urlsToMove, to: destFolder, isCopy: isCopy) {
+            // Recargar destino ahora que los archivos ya fueron movidos
+            destSession.loadFolder(url: destFolder, sidebarManager: manager)
+            // Reafirmar el foco en el panel de origen
+            currentTab.activePane = originPane
+            if let activeURL = sourceSession.activeItemURL {
+                sourceSession.updateMetadata(for: activeURL)
+            }
         }
     }
 
@@ -2368,6 +2385,23 @@ struct WorkspaceView: View {
                             if let urls = crossPaneSelectedImages {
                                 crossPaneCompareURLs = urls
                             }
+                        },
+                        onActivatePane: {
+                            activePane = .left
+                        },
+                        onDropFiles: { droppedURLs in
+                            guard let destFolder = session.currentFolderURL else { return }
+                            let sourceURLs = !droppedURLs.isEmpty ? droppedURLs : Array(sessionRight.selectedItemURLs)
+                            guard !sourceURLs.isEmpty else { return }
+                            let originPane = activePane
+                            let source = (originPane == .right) ? sessionRight : session
+                            source.moveFiles(urls: sourceURLs, to: destFolder) {
+                                session.loadFolder(url: destFolder, sidebarManager: sidebarManager)
+                                activePane = originPane
+                                if let activeURL = source.activeItemURL {
+                                    source.updateMetadata(for: activeURL)
+                                }
+                            }
                         }
                     )
                     .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
@@ -2395,6 +2429,23 @@ struct WorkspaceView: View {
                             if let urls = crossPaneSelectedImages {
                                 crossPaneCompareURLs = urls
                             }
+                        },
+                        onActivatePane: {
+                            activePane = .right
+                        },
+                        onDropFiles: { droppedURLs in
+                            guard let destFolder = sessionRight.currentFolderURL else { return }
+                            let sourceURLs = !droppedURLs.isEmpty ? droppedURLs : Array(session.selectedItemURLs)
+                            guard !sourceURLs.isEmpty else { return }
+                            let originPane = activePane
+                            let source = (originPane == .left) ? session : sessionRight
+                            source.moveFiles(urls: sourceURLs, to: destFolder) {
+                                sessionRight.loadFolder(url: destFolder, sidebarManager: sidebarManager)
+                                activePane = originPane
+                                if let activeURL = source.activeItemURL {
+                                    source.updateMetadata(for: activeURL)
+                                }
+                            }
                         }
                     )
                     .frame(minWidth: 200, maxWidth: .infinity, maxHeight: .infinity)
@@ -2410,7 +2461,14 @@ struct WorkspaceView: View {
                     }
                 }
             } else {
-                PaneBrowserView(sidebarManager: sidebarManager, sidebarSelection: sidebarSelectionBinding, session: session)
+                PaneBrowserView(
+                    sidebarManager: sidebarManager,
+                    sidebarSelection: sidebarSelectionBinding,
+                    session: session,
+                    onActivatePane: {
+                        activePane = .left
+                    }
+                )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .simultaneousGesture(TapGesture().onEnded {
                         activePane = .left
@@ -2463,9 +2521,6 @@ struct WorkspaceView: View {
                 } else { ImmersiveWindowController.shared.hide() }
             }
             .onChange(of: session.activeItemURL) { _, newURL in
-                if newURL != nil {
-                    activePane = .left
-                }
                 session.updateMetadata(for: newURL)
             }
         )
@@ -2483,9 +2538,6 @@ struct WorkspaceView: View {
                 } else if session.fullScreenImageURL == nil { ImmersiveWindowController.shared.hide() }
             }
             .onChange(of: sessionRight.activeItemURL) { _, newURL in
-                if newURL != nil {
-                    activePane = .right
-                }
                 sessionRight.updateMetadata(for: newURL)
             }
             .onChange(of: session.compareImageURLs) { _, newURLs in
@@ -2732,13 +2784,25 @@ struct WorkspaceView: View {
                     }
                 }
                 updateWindowTitle()
+
+                if let fsURL = session.fullScreenImageURL {
+                    ImmersiveWindowController.shared.show {
+                        FullScreenImageView(url: fsURL, onClose: { session.fullScreenImageURL = nil },
+                                            navigateImage: { session.navigateFullScreen(direction: $0) },
+                                            onImageEdited: { edited, backup in
+                                                session.recordImageEdit(target: edited, backup: backup)
+                                            })
+                    }
+                }
             }
             .onDisappear {
                 if let monitor = eventMonitor {
                     NSEvent.removeMonitor(monitor)
                     eventMonitor = nil
                 }
-                ImmersiveWindowController.shared.hide()
+                if session.fullScreenImageURL == nil {
+                    ImmersiveWindowController.shared.hide()
+                }
             }
             .onChange(of: activeSession().currentFolderURL) { _, _ in updateWindowTitle() }
     }
@@ -2842,8 +2906,11 @@ struct ContentView: View {
         .onDisappear {
             removeTabKeyMonitor()
         }
-        .onChange(of: activeTabID) { _, _ in
-            ImmersiveWindowController.shared.hide()
+        .onChange(of: activeTabID) { _, newTabID in
+            let targetTab = tabs.first(where: { $0.id == newTabID })
+            if targetTab?.session.fullScreenImageURL == nil {
+                ImmersiveWindowController.shared.hide()
+            }
             saveSession()
         }
         .onChange(of: tabs.count) { _, _ in
@@ -2898,12 +2965,20 @@ struct ContentView: View {
         TabSessionStore.save(tabs: tabs, activeTabID: activeTabID)
     }
 
-    /// Imagen abierta desde fuera (Finder, "Open With"): se abre en un tab nuevo
-    /// para no pisar la navegación de los tabs existentes. Si se alcanzó el límite,
-    /// se recicla el tab más antiguo que no esté activo.
+    /// Imagen abierta desde fuera (Finder, "Open With"): se reutiliza una pestaña existente
+    /// si ya tiene la carpeta o está en estado inicial (Home sin selección), o se abre en un tab nuevo.
     private func openFromExternal(_ url: URL) {
+        let folderURL = url.deletingLastPathComponent()
+
         let tab: WorkspaceTab
-        if tabs.count >= Self.maxTabs {
+        if let existing = tabs.first(where: { $0.sidebarSelection == folderURL || $0.session.currentFolderURL == folderURL }) {
+            tab = existing
+        } else if tabs.count == 1,
+                  let single = tabs.first,
+                  (single.session.currentFolderURL == nil || single.session.currentFolderURL == FileManager.default.homeDirectoryForCurrentUser),
+                  single.session.selectedItemURLs.isEmpty {
+            tab = single
+        } else if tabs.count >= Self.maxTabs {
             if let recycled = tabs.first(where: { $0.id != activeTabID }) ?? tabs.first {
                 tab = recycled
             } else {
@@ -2913,12 +2988,33 @@ struct ContentView: View {
             tab = WorkspaceTab()
             tabs.append(tab)
         }
-        tab.sidebarSelection = url.deletingLastPathComponent()
+
+        tab.sidebarSelection = folderURL
         tab.session.activeItemURL = url
         tab.session.selectedItemURLs = [url]
         tab.session.fullScreenImageURL = url
+
+        if tab.session.currentFolderURL != folderURL {
+            tab.session.loadFolder(url: folderURL, sidebarManager: sidebarManager)
+        }
+
         activeTabID = tab.id
         saveSession()
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        DispatchQueue.main.async {
+            ImmersiveWindowController.shared.show {
+                FullScreenImageView(
+                    url: url,
+                    onClose: { tab.session.fullScreenImageURL = nil },
+                    navigateImage: { tab.session.navigateFullScreen(direction: $0) },
+                    onImageEdited: { edited, backup in
+                        tab.session.recordImageEdit(target: edited, backup: backup)
+                    }
+                )
+            }
+        }
     }
 }
 

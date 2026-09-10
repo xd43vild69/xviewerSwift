@@ -7,7 +7,10 @@ struct PaneBrowserView: View {
     @ObservedObject var session: BrowserSession
     var otherPaneSelectedImageCount: Int = 0
     var crossPaneCompareAction: (() -> Void)? = nil
+    var onActivatePane: (() -> Void)? = nil
+    var onDropFiles: (([URL]) -> Void)? = nil
     @State private var scrollDebounceTask: Task<Void, Never>?
+    @State private var isDropTargeted: Bool = false
 
     var body: some View {
 
@@ -100,7 +103,8 @@ struct PaneBrowserView: View {
                                     }
                                     session.setTagColor(color, for: urlsToUpdate)
                                     sidebarManager.updateTagColor(for: targetURL, color: color)
-                                }
+                                },
+                                onActivatePane: onActivatePane
                             )
                             .id(item.url)
                         }
@@ -156,11 +160,34 @@ struct PaneBrowserView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.clear)
+        .background(isDropTargeted ? Color.blue.opacity(0.08) : Color.clear)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(isDropTargeted ? Color.blue : Color.clear, lineWidth: 2)
+        )
         .contentShape(Rectangle())
         .onTapGesture {
+            onActivatePane?()
             session.selectedItemURLs.removeAll()
             session.activeItemURL = nil
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            onActivatePane?()
+            let group = DispatchGroup()
+            var droppedURLs: [URL] = []
+            for provider in providers {
+                group.enter()
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    if let url = url {
+                        droppedURLs.append(url)
+                    }
+                    group.leave()
+                }
+            }
+            group.notify(queue: .main) {
+                onDropFiles?(droppedURLs)
+            }
+            return true
         }
         .contextMenu {
             Button { session.currentSortOrder = .name } label: {

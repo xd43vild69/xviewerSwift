@@ -74,7 +74,7 @@ final class WorkspaceTab: Identifiable, ObservableObject {
                                  options: [.withSecurityScope, .withoutUI, .withoutMounting],
                                  relativeTo: nil,
                                  bookmarkDataIsStale: &isStale),
-              (try? url.checkResourceIsReachable()) == true else { return nil }
+              FileManager.default.fileExists(atPath: url.path) else { return nil }
         return url
     }
 }

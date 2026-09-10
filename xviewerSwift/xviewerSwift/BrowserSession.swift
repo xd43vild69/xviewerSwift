@@ -488,26 +488,27 @@ class BrowserSession: ObservableObject {
     
     private func computeNextFocus(for itemURL: URL, excluding targets: Set<URL>) -> URL? {
         let allItems = self.folderContents.filter { !$0.isDirectory }
+        let targetPaths = Set(targets.map { $0.standardizedFileURL.path })
 
-        guard let index = allItems.firstIndex(where: { $0.url == itemURL }) else {
-            return allItems.first(where: { !targets.contains($0.url) })?.url
-        }
+        let itemPath = itemURL.standardizedFileURL.path
+        if let index = allItems.firstIndex(where: { $0.url.standardizedFileURL.path == itemPath }) {
+            // 1. Intentar seleccionar la imagen anterior (hacia atrás)
+            for i in stride(from: index - 1, through: 0, by: -1) {
+                if !targetPaths.contains(allItems[i].url.standardizedFileURL.path) {
+                    return allItems[i].url
+                }
+            }
 
-        // Try to find the previous item that is not being excluded
-        for i in stride(from: index - 1, through: 0, by: -1) {
-            if !targets.contains(allItems[i].url) {
-                return allItems[i].url
+            // 2. Si no hay anterior (estaba en la primera imagen), seleccionar la siguiente
+            for i in stride(from: index + 1, to: allItems.count, by: 1) {
+                if !targetPaths.contains(allItems[i].url.standardizedFileURL.path) {
+                    return allItems[i].url
+                }
             }
         }
 
-        // If no previous item found, try to find the next item
-        for i in stride(from: index + 1, to: allItems.count, by: 1) {
-            if !targets.contains(allItems[i].url) {
-                return allItems[i].url
-            }
-        }
-
-        return nil
+        // 3. Fallback al primer item disponible que no esté en los removidos
+        return allItems.first(where: { !targetPaths.contains($0.url.standardizedFileURL.path) })?.url
     }
 
     func deleteSelectedItem() {
@@ -670,17 +671,26 @@ class BrowserSession: ObservableObject {
                     }
 
                     DispatchQueue.main.async { [weak self] in
-                        self?.allFolderContents.removeAll(where: { movedURLs.contains($0.url) })
-                        self?.updateFilteredFolderContents()
-                        self?.selectedItemURLs = []
+                        guard let self = self else { return }
+                        self.allFolderContents.removeAll(where: { movedURLs.contains($0.url) })
                         if let next = nextURL {
-                            self?.selectedItemURLs = [next]
-                            self?.activeItemURL = next
+                            self.activeItemURL = next
+                            self.selectedItemURLs = [next]
                         } else {
-                            self?.activeItemURL = nil
+                            self.activeItemURL = nil
+                            self.selectedItemURLs = []
                         }
-                        if self?.fullScreenImageURL != nil { self?.fullScreenImageURL = nextURL }
-                        self?.fileOperation.reset()
+                        self.updateFilteredFolderContents()
+                        if let next = nextURL {
+                            self.activeItemURL = next
+                            self.selectedItemURLs = [next]
+                        } else {
+                            self.activeItemURL = nil
+                            self.selectedItemURLs = []
+                        }
+                        self.updateMetadata(for: self.activeItemURL)
+                        if self.fullScreenImageURL != nil { self.fullScreenImageURL = nextURL }
+                        self.fileOperation.reset()
                     }
                 } catch {
                     DispatchQueue.main.async { [weak self] in
@@ -794,9 +804,13 @@ class BrowserSession: ObservableObject {
 
     /// Mueve (por defecto) o copia archivos al directorio destino.
     /// En modo copia los archivos de origen se conservan y la selección no cambia.
-    func moveFiles(urls: [URL], to destinationDir: URL, isCopy: Bool = false) {
+    func moveFiles(urls: [URL], to destinationDir: URL, isCopy: Bool = false, completion: (() -> Void)? = nil) {
         let operationID = UUID()
         fileOperation.cancellationToken = operationID
+
+        // Pre-computar el siguiente foco en el hilo principal antes del movimiento asíncrono
+        let currentFocusURL = self.activeItemURL ?? self.selectedItemURLs.first ?? self.folderContents.first?.url ?? URL(fileURLWithPath: "/")
+        let precomputedNextFocus = !isCopy ? computeNextFocus(for: currentFocusURL, excluding: Set(urls)) : nil
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
@@ -885,6 +899,7 @@ class BrowserSession: ObservableObject {
                             self?.recordOperation(.copy(destinations: destinations))
                         }
                         self?.fileOperation.reset()
+                        completion?()
                     }
                 } else if !successfullyMoved.isEmpty {
                     DispatchQueue.main.async { [weak self] in
@@ -892,21 +907,40 @@ class BrowserSession: ObservableObject {
                     }
 
                     DispatchQueue.main.async { [weak self] in
-                        let nextFocus = self?.computeNextFocus(for: self?.activeItemURL ?? self?.folderContents.first?.url ?? URL(fileURLWithPath: "/"), excluding: successfullyMoved)
-                        self?.allFolderContents.removeAll(where: { successfullyMoved.contains($0.url) })
-                        self?.updateFilteredFolderContents()
-                        self?.selectedItemURLs.subtract(successfullyMoved)
-                        if let next = nextFocus {
-                            self?.activeItemURL = next
-                            self?.selectedItemURLs = [next]
-                        } else {
-                            self?.activeItemURL = nil
+                        guard let self = self else {
+                            completion?()
+                            return
                         }
-                        self?.fileOperation.reset()
+                        self.allFolderContents.removeAll(where: { successfullyMoved.contains($0.url) })
+
+                        let targetFocus = precomputedNextFocus ?? self.computeNextFocus(for: currentFocusURL, excluding: successfullyMoved)
+
+                        if let next = targetFocus {
+                            self.activeItemURL = next
+                            self.selectedItemURLs = [next]
+                        } else {
+                            self.activeItemURL = nil
+                            self.selectedItemURLs = []
+                        }
+
+                        self.updateFilteredFolderContents()
+
+                        if let next = targetFocus {
+                            self.activeItemURL = next
+                            self.selectedItemURLs = [next]
+                        } else {
+                            self.activeItemURL = nil
+                            self.selectedItemURLs = []
+                        }
+
+                        self.updateMetadata(for: self.activeItemURL)
+                        self.fileOperation.reset()
+                        completion?()
                     }
                 } else {
                     DispatchQueue.main.async { [weak self] in
                         self?.fileOperation.reset()
+                        completion?()
                     }
                 }
             }
@@ -928,7 +962,7 @@ class BrowserSession: ObservableObject {
         do {
             let url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &isStale)
             
-            guard (try? url.checkResourceIsReachable()) == true else {
+            guard FileManager.default.fileExists(atPath: url.path) else {
                 UserDefaults.standard.removeObject(forKey: "lastFolderBookmark")
                 return nil
             }
